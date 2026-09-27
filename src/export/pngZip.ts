@@ -27,6 +27,16 @@ export async function exportPngZip(job: ExportJob): Promise<ExportResult> {
     zipRef.add(entry);
     return (png) => entry.push(png, true);
   });
+  if (job.audio) {
+    // The song travels with the frames, cut to the same window, so editors line it up at 0.
+    const { encodeWav } = await import('../audio/wav');
+    const { decodeSong, sliceBuffer } = await import('../audio/song');
+    const { audioWindow } = await import('./audio');
+    const w = audioWindow(job);
+    const entry = new ZipPassThrough('audio.wav');
+    zipRef.add(entry);
+    entry.push(encodeWav(sliceBuffer(await decodeSong(job.audio), w.start, w.duration)), true);
+  }
   zipRef.end();
   await done;
   return {

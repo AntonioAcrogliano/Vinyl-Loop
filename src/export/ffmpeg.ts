@@ -1,4 +1,5 @@
 import type { FFmpeg } from '@ffmpeg/ffmpeg';
+import { audioWindow } from './audio';
 import { ExportCancelled, exportFilename, type ExportJob, type ExportResult } from './common';
 import { frameName, renderPngSequence } from './pngSequence';
 
@@ -22,6 +23,8 @@ export interface FFmpegEncode {
   mime: string;
   /** Output-side ffmpeg arguments (codec, pixel format, …). */
   args: string[];
+  /** Audio codec arguments, used when the job has a song. */
+  audioArgs: string[];
   stage: string;
 }
 
@@ -48,6 +51,17 @@ export async function exportWithFFmpeg(job: ExportJob, enc: FFmpegEncode): Promi
     if (job.signal?.aborted) throw new ExportCancelled();
 
     const digits = frameName(0, total).length - 'frame_.png'.length;
+    // The song goes in as a second input, cut to the export's window.
+    let audioIn: string[] = [];
+    let audioOut: string[] = [];
+    if (job.audio) {
+      const ext = /\.([a-z0-9]+)$/i.exec(job.audio.name)?.[1] ?? 'audio';
+      const name = `song.${ext}`;
+      await ffmpeg.writeFile(name, new Uint8Array(await job.audio.arrayBuffer()));
+      const w = audioWindow(job);
+      audioIn = ['-ss', w.start.toFixed(3), '-t', w.duration.toFixed(3), '-i', name];
+      audioOut = ['-map', '0:v', '-map', '1:a', ...enc.audioArgs, '-shortest'];
+    }
     ffmpeg.on('progress', ({ progress }) => {
       job.onProgress?.(Math.round(Math.min(1, Math.max(0, progress)) * frames), frames, enc.stage);
     });
@@ -55,7 +69,9 @@ export async function exportWithFFmpeg(job: ExportJob, enc: FFmpegEncode): Promi
     const code = await ffmpeg.exec([
       '-framerate', String(cfg.fps),
       '-i', `frame_%0${digits}d.png`,
+      ...audioIn,
       ...enc.args,
+      ...audioOut,
       '-r', String(cfg.fps),
       out,
     ]);

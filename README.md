@@ -20,6 +20,9 @@ npm run build    # typecheck + build estático en dist/
 - **Fondos**: transparente, sólido, degradé giratorio, mesh/blobs, rayos, polvo/partículas, retro/VHS (grilla o scanlines) y bokeh. La paleta se edita a mano o se saca de la foto (k-means).
 - **Overlays**: grano (re-seedeado cada frame, periódico con el loop) y viñeta.
 - **Intro / loop / outro**: el giro se integra frame a frame; los empalmes intro→loop y loop→outro no tienen salto de ángulo, velocidad, posición ni fase.
+- **Texto de presentación**: tema y artista, con posición, tipografía, tamaño, color y sombra. Animación de entrada en la intro y de salida en el outro (fundido, deslizar, barrido, máquina de escribir, letra por letra); durante el loop queda fijo. La composición se corre sola para dejarle lugar.
+- **Duración del tema**: escribís la duración (ej. 3:42) y arma intro + N loops + outro que dura exactamente eso, al frame (`src/utils/fit.ts`).
+- **Canción**: subís el audio (MP3, M4A, WAV, OGG, FLAC) y arma todo con su duración, completa el texto con los tags y usa la tapa embebida si no hay foto. La preview "Canción" suena sincronizada (el audio es el reloj) y los exports llevan el audio: MP4 con AAC, WebM con Opus, ProRes con PCM y el ZIP con `audio.wav`.
 - **Presets**: se guardan en localStorage y se exportan / importan como JSON (sin imágenes).
 - **Exportación**: intro, N loops y outro combinables.
 
@@ -34,7 +37,7 @@ ffmpeg.wasm usa el core single-thread (no necesita headers COOP/COEP), se sirve 
 
 ## Interfaz
 
-Panel por pestañas (Imagen, Escena, Movimiento, Fondo, Presets, Exportar), timeline con los segmentos intro / loop / outro (clic o arrastre para ir a un frame) y atajos: **Espacio** play/pausa, **← →** un frame, **Shift + ← →** un segundo, **Inicio** vuelve al principio.
+Panel por pestañas (Imagen, Escena, Texto, Música, Fondo, Exportar), timeline con los segmentos intro / loop / outro (clic o arrastre para ir a un frame) y atajos: **Espacio** play/pausa, **← →** un frame, **Shift + ← →** un segundo, **Inicio** vuelve al principio.
 
 ## Cómo está armado
 

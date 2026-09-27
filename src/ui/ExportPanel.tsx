@@ -1,7 +1,9 @@
+import type { Song } from '../audio/song';
 import type { ExportFormat } from '../export/common';
 import type { ExportPlan } from '../render/scene';
 import type { Timing } from '../render/timing';
 import type { SceneConfig } from '../render/types';
+import type { SongFit } from '../utils/fit';
 import { Icon } from './icons';
 import { Check, Section } from './widgets';
 
@@ -30,6 +32,12 @@ interface Props {
   webmNative: boolean | null;
   onExport: () => void;
   onCancel: () => void;
+  song: Song | null;
+  includeAudio: boolean;
+  setIncludeAudio: (v: boolean) => void;
+  /** Plan that matches the song duration, if any. */
+  fit: SongFit | null;
+  onUseFit: () => void;
 }
 
 const fmt = (n: number, d = 1) => n.toLocaleString('es-AR', { maximumFractionDigits: d });
@@ -40,6 +48,9 @@ export function ExportPanel(p: Props) {
   const setPlan = (patch: Partial<ExportPlan>) => p.setSettings({ ...settings, plan: { ...plan, ...patch } });
   const frames = (plan.intro ? t.I : 0) + plan.loops * t.F + (plan.outro ? t.O : 0);
   const mp4Blocked = p.transparent || p.mp4Available === false;
+  const fit = p.fit;
+  const matchesFit = !!fit && plan.intro && plan.outro && plan.loops === fit.loops && t.I === fit.introFrames && t.O === fit.outroFrames;
+  const withAudio = !!p.song && p.includeAudio;
 
   const formats: { value: ExportFormat; name: string; desc: string; alpha: boolean; disabled?: string }[] = [
     {
@@ -50,7 +61,7 @@ export function ExportPanel(p: Props) {
       disabled: p.transparent ? 'No soporta transparencia' : p.mp4Available === false ? 'Este navegador no puede codificar H.264' : undefined,
     },
     { value: 'webm', name: 'WebM', desc: p.webmNative === false ? 'Web y OBS. Vía ffmpeg.wasm (VP8).' : 'Web y OBS. VP9.', alpha: true },
-    { value: 'png', name: 'PNG (ZIP)', desc: 'Secuencia de imágenes. Máxima compatibilidad.', alpha: true },
+    { value: 'png', name: 'PNG (ZIP)', desc: withAudio ? 'Secuencia de imágenes + audio.wav.' : 'Secuencia de imágenes. Máxima compatibilidad.', alpha: true },
     { value: 'prores', name: 'ProRes 4444', desc: 'Premiere, DaVinci, Final Cut. Pesado.', alpha: true },
   ];
 
@@ -73,8 +84,17 @@ export function ExportPanel(p: Props) {
             <small>× {fmt(t.F / cfg.fps)} s</small>
           </div>
           <Check label={cfg.outroEnabled ? `Outro · ${fmt(t.O / cfg.fps)} s` : 'Outro (desactivado)'} checked={plan.outro} disabled={!cfg.outroEnabled} onChange={(outro) => setPlan({ outro })} />
-          {(!cfg.introEnabled || !cfg.outroEnabled) && <p className="hint">La intro y el outro se activan en la pestaña Movimiento.</p>}
+          {(!cfg.introEnabled || !cfg.outroEnabled) && <p className="hint">La intro y el outro se activan en la pestaña Música.</p>}
         </div>
+        {fit && !matchesFit && (
+          <button type="button" className="secondary" onClick={p.onUseFit}>
+            Usar el plan del tema: {fit.loops} loops, dura lo mismo que la canción
+          </button>
+        )}
+        {fit && matchesFit && <p className="hint ok">Dura exactamente lo mismo que el tema.</p>}
+        {p.song && (
+          <Check label={`Incluir la canción (${p.song.title ?? p.song.name})`} checked={p.includeAudio} onChange={p.setIncludeAudio} />
+        )}
       </Section>
 
       <Section title="Formato">
@@ -109,7 +129,7 @@ export function ExportPanel(p: Props) {
 
       <div className="export-footer">
         <div className="summary">
-          <b>{frames} frames</b> · {fmt(frames / cfg.fps, 2)} s · {cfg.width}×{cfg.height} · {cfg.fps} fps
+          <b>{frames} frames</b> · {fmt(frames / cfg.fps, 2)} s · {cfg.width}×{cfg.height} · {cfg.fps} fps{withAudio ? ' · con audio' : ''}
         </div>
         {st.running ? (
           <div className="progress-wrap">

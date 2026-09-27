@@ -11,6 +11,7 @@ import {
   roundRectPath,
   sleeveRadius,
 } from './sleeve';
+import { drawTitleCard } from './text';
 import { TAU, frameState, getTiming, type FrameRef, type Timing } from './timing';
 import type { AnyCanvas, CanvasFactory, Ctx2D, ImageLike, SceneAssets, SceneConfig, Sprite } from './types';
 import { buildDiscCanvas, drawSheen, type LabelArt } from './vinyl';
@@ -233,7 +234,8 @@ export function renderFrame(ctx: Ctx2D, frame: number | FrameRef, cfg: SceneConf
     drawSleeve();
   }
 
-  // 5. Overlays
+  // 5. Title card, then overlays (so grain and vignette also affect the text).
+  drawTitleCard(ctx, W, H, cfg, st, t);
   drawOverlays(ctx, W, H, cfg, st.seed, assets.grainTiles, !!bg.transparent);
 
   ctx.restore();

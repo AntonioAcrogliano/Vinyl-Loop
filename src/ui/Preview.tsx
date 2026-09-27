@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { canvasFactory } from '../export/common';
 import { getBackground } from '../render/backgrounds';
-import { buildAssets, framesFor, renderFrame, timingFor, type SceneImages } from '../render/scene';
+import { buildAssets, framesFor, renderFrame, timingFor, type ExportPlan, type SceneImages } from '../render/scene';
 import type { FrameRef, Segment, Timing } from '../render/timing';
 import type { SceneConfig } from '../render/types';
 import { Icon } from './icons';
 
-export type PreviewMode = 'loop' | 'introLoop' | 'full';
+export type PreviewMode = 'loop' | 'introLoop' | 'full' | 'song';
 
 interface Props {
   cfg: SceneConfig;
@@ -18,6 +18,10 @@ interface Props {
   restartKey: number;
   hasPhoto: boolean;
   onPickPhoto: () => void;
+  /** Song playback for the "song" mode: the audio is the master clock. */
+  songUrl: string | null;
+  /** Plan played in "song" mode (intro + N loops + outro). */
+  songPlan: ExportPlan | null;
 }
 
 /** Longest side of the preview bitmap; the render is resolution-independent. */
@@ -31,10 +35,13 @@ interface Sequence {
   parts: { seg: Segment; start: number; len: number }[];
 }
 
-function sequenceFor(t: Timing, mode: PreviewMode, fps: number): Sequence {
+function sequenceFor(t: Timing, mode: PreviewMode, fps: number, songPlan: ExportPlan | null): Sequence {
   let frames: FrameRef[];
   let repeatFrom = 0;
-  if (mode === 'loop' || (mode === 'introLoop' && t.I === 0)) {
+  if (mode === 'song' && songPlan) {
+    frames = framesFor(t, songPlan);
+    if (frames.length === 0) frames = framesFor(t, { intro: false, loops: 1, outro: false });
+  } else if (mode === 'loop' || (mode === 'introLoop' && t.I === 0)) {
     frames = framesFor(t, { intro: false, loops: 1, outro: false });
   } else if (mode === 'introLoop') {
     frames = framesFor(t, { intro: true, loops: 1, outro: false });
@@ -63,7 +70,7 @@ function describe(ref: FrameRef, t: Timing): string {
   return `${SEG_NAME[ref.seg]} · frame ${ref.i + 1}/${total}`;
 }
 
-export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, hasPhoto, onPickPhoto }: Props) {
+export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, hasPhoto, onPickPhoto, songUrl, songPlan }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const statusRef = useRef<HTMLSpanElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
@@ -73,7 +80,24 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
   const pw = Math.max(2, Math.round(cfg.width * scale));
   const ph = Math.max(2, Math.round(cfg.height * scale));
   const timing = timingFor(cfg);
-  const seq = useMemo(() => sequenceFor(timing, mode, cfg.fps), [timing, mode, cfg.fps]);
+  const seq = useMemo(() => sequenceFor(timing, mode, cfg.fps, songPlan), [timing, mode, cfg.fps, songPlan]);
+
+  // Audio element for the song mode; its currentTime drives the frame.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [muted, setMuted] = useState(false);
+  useEffect(() => {
+    if (!songUrl) return;
+    const a = new Audio(songUrl);
+    a.preload = 'auto';
+    audioRef.current = a;
+    return () => {
+      a.pause();
+      audioRef.current = null;
+    };
+  }, [songUrl]);
+  const songActive = mode === 'song' && !!songUrl;
+  // Song time of frame 0: an export without the intro starts the audio at the loop.
+  const audioOffset = songPlan && !songPlan.intro ? timing.I / cfg.fps : 0;
 
   // Static caches depend only on what they draw, not on timing or background.
   const assets = useMemo(
@@ -101,19 +125,26 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
 
   // Playback clock: position in frames = anchorPos (+ elapsed time while playing).
   const clock = useRef({ anchorTime: performance.now(), anchorPos: 0 });
-  const live = useRef({ cfg, seq, playing, assets });
-  live.current = { cfg, seq, playing, assets };
+  const live = useRef({ cfg, seq, playing, assets, songActive, audioOffset });
+  live.current = { cfg, seq, playing, assets, songActive, audioOffset };
   const posNow = useCallback(() => {
+    const L = live.current;
+    const a = audioRef.current;
+    if (L.songActive && a) return Math.max(0, (a.currentTime - L.audioOffset) * L.cfg.fps);
     const c = clock.current;
-    return live.current.playing ? c.anchorPos + ((performance.now() - c.anchorTime) / 1000) * live.current.cfg.fps : c.anchorPos;
+    return L.playing ? c.anchorPos + ((performance.now() - c.anchorTime) / 1000) * L.cfg.fps : c.anchorPos;
   }, []);
   const seek = useCallback((pos: number) => {
+    const L = live.current;
+    const a = audioRef.current;
+    if (L.songActive && a) a.currentTime = Math.max(0, pos) / L.cfg.fps + L.audioOffset;
     clock.current = { anchorTime: performance.now(), anchorPos: Math.max(0, pos) };
   }, []);
   const indexNow = useCallback(() => {
     const { seq: s } = live.current;
     const n = Math.floor(posNow() + 1e-6);
     const len = s.frames.length;
+    if (live.current.songActive) return Math.min(len - 1, n);
     return n < len ? n : s.repeatFrom + ((n - s.repeatFrom) % (len - s.repeatFrom));
   }, [posNow]);
 
@@ -127,6 +158,23 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
   }
 
   useEffect(() => seek(0), [restartKey, mode, seek]);
+
+  // Play / pause the song with the transport; restart it at the end, like the other modes.
+  useEffect(() => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.muted = muted;
+    if (songActive && playing) {
+      a.play().catch(() => setPlaying(false));
+      const onEnd = () => {
+        a.currentTime = audioOffset;
+        a.play().catch(() => setPlaying(false));
+      };
+      a.addEventListener('ended', onEnd);
+      return () => a.removeEventListener('ended', onEnd);
+    }
+    a.pause();
+  }, [songActive, playing, muted, audioOffset, setPlaying, songUrl]);
 
   // One render loop for the component's lifetime; it only draws when the frame changes.
   useEffect(() => {
@@ -168,8 +216,8 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
   // Keyboard: space = play/pause, ←/→ = one frame (Shift: one second), Home = start.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el.closest('input, textarea, select, [contenteditable]')) return;
+      // The target can be the window or document (no focus), not only elements.
+      if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable]')) return;
       if (e.code === 'Space') {
         e.preventDefault();
         setPlaying((p) => !p);
@@ -217,6 +265,11 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
         <button type="button" className="icon-btn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pausa' : 'Reproducir'} title="Espacio">
           <Icon name={playing ? 'pause' : 'play'} />
         </button>
+        {songActive && (
+          <button type="button" className="icon-btn" onClick={() => setMuted((m) => !m)} aria-label={muted ? 'Activar sonido' : 'Silenciar'}>
+            <Icon name={muted ? 'mute' : 'volume'} />
+          </button>
+        )}
         <div
           className="timeline"
           ref={barRef}

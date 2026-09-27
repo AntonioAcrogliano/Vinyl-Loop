@@ -15,5 +15,7 @@ export function exportProRes(job: ExportJob): Promise<ExportResult> {
       '-vendor', 'apl0',
       '-bits_per_mb', '8000',
     ],
+    // Uncompressed PCM: what editors handle best in a .mov.
+    audioArgs: ['-c:a', 'pcm_s16le', '-ar', '48000'],
   });
 }

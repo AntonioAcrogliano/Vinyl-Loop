@@ -8,8 +8,10 @@ export interface ExportJob {
   images: SceneImages;
   plan: ExportPlan;
   format: ExportFormat;
-  /** Base name, usually the photo file name without extension. */
+  /** Base name, usually the song or photo file name without extension. */
   name: string;
+  /** Song to put in the video (starts with the intro). */
+  audio?: File;
   /** `stage` describes the current step when an export has more than one (render, encode…). */
   onProgress?: (done: number, total: number, stage?: string) => void;
   signal?: AbortSignal;

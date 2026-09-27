@@ -1,3 +1,4 @@
+import { textReserve } from './text';
 import { clamp01, easeInOutCubic, easeOutCubic } from './timing';
 import type { SceneConfig } from './types';
 
@@ -36,7 +37,8 @@ export function placement(cfg: SceneConfig, W: number, H: number, move: number):
   const D = DISC_TO_SLEEVE * S;
   const [dx, dy] = directionVector(cfg);
   const cx = W / 2 + cfg.offsetX * W;
-  const cy = H / 2 + cfg.offsetY * H;
+  // Leave room for the title card: the group moves half the text height away from it.
+  const cy = H / 2 + cfg.offsetY * H - textReserve(cfg, W, H) / 2;
   const u = clamp01(move);
 
   if (cfg.layout === 'solo') {

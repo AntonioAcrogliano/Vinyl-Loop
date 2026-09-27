@@ -11,6 +11,10 @@ const paths = {
   restart: 'M4 12a8 8 0 1 0 2.5-5.8 M4 4v4h4',
   upload: 'M12 16V4 M7 9l5-5 5 5 M5 20h14',
   keyboard: 'M3 7h18v10H3z M7 11h.01 M11 11h.01 M15 11h.01 M8 14h8',
+  music: 'M9 18V6l11-2v12 M9 18a3 3 0 1 1-6 0a3 3 0 1 1 6 0 M20 16a3 3 0 1 1-6 0a3 3 0 1 1 6 0',
+  text: 'M5 6V4h14v2 M12 4v16 M9 20h6',
+  volume: 'M4 9v6h4l5 4V5L8 9z M16.5 8.5a5 5 0 0 1 0 7 M19 6a8.5 8.5 0 0 1 0 12',
+  mute: 'M4 9v6h4l5 4V5L8 9z M17 9l5 6 M22 9l-5 6',
 };
 
 export type IconName = keyof typeof paths;

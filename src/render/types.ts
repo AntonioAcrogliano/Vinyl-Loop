@@ -12,6 +12,10 @@ export type CoverStyle = 'full' | 'dieCut';
 export type SleeveMaterial = 'kraft' | 'white' | 'black' | 'color' | 'photo';
 /** cover: label uses the cover photo · image: a separate image · preset: a standard label design. */
 export type LabelSource = 'cover' | 'image' | 'preset';
+export type TextPosition = 'bottom' | 'bottomLeft' | 'top' | 'topLeft';
+export type TextFont = 'sans' | 'serif' | 'condensed' | 'mono';
+/** How the title card enters during the intro / leaves during the outro. */
+export type TextAnim = 'none' | 'fade' | 'slide' | 'wipe' | 'typewriter' | 'letters';
 
 /** Square crop: center in normalized image coords, zoom ≥ 1 (1 = largest square that fits). */
 export interface Crop {
@@ -89,6 +93,21 @@ export interface SceneConfig {
     title: string;
     subtitle: string;
   };
+  /** Title card with the song name and artist. Static during the loop, animated in the intro / outro. */
+  text: {
+    enabled: boolean;
+    title: string;
+    artist: string;
+    position: TextPosition;
+    font: TextFont;
+    /** Size multiplier, 1 = default. */
+    size: number;
+    color: string;
+    uppercase: boolean;
+    shadow: boolean;
+    animIn: TextAnim;
+    animOut: TextAnim;
+  };
   coverCrop: Crop;
   labelCrop: Crop;
 }
@@ -140,6 +159,20 @@ export const DEFAULT_CONFIG: SceneConfig = {
   shadow: 0.6,
   coverCrop: DEFAULT_CROP,
   label: { source: 'cover', preset: 'classic', color: '', title: 'Vinilo Loop', subtitle: 'Lado A' },
+  text: {
+    enabled: false,
+    title: 'Nombre del tema',
+    artist: 'Artista',
+    position: 'bottom',
+    font: 'sans',
+    size: 1,
+    // Dark on the default cream background; switch to white (with shadow) on dark backgrounds.
+    color: '#1c1c1e',
+    uppercase: false,
+    shadow: false,
+    animIn: 'letters',
+    animOut: 'fade',
+  },
   labelCrop: DEFAULT_CROP,
 };
 
@@ -153,6 +186,7 @@ export function normalizeConfig(c: Partial<SceneConfig> & { useSeparateLabel?: b
     ...d,
     ...rest,
     label,
+    text: { ...d.text, ...c.text },
     background: { ...d.background, ...c.background },
     overlays: { ...d.overlays, ...c.overlays },
     vinyl: { ...d.vinyl, ...c.vinyl },

@@ -1,5 +1,6 @@
 import { BufferTarget, CanvasSource, Output, WebMOutputFormat, canEncodeVideo } from 'mediabunny';
 import { getBackground } from '../render/backgrounds';
+import { addAudioTrack, writeAudio } from './audio';
 import { ExportCancelled, canvasFactory, exportFilename, renderSequence, type ExportJob, type ExportResult } from './common';
 import { exportWithFFmpeg } from './ffmpeg';
 import { mp4Bitrate } from './mp4';
@@ -35,6 +36,7 @@ export async function exportWebm(job: ExportJob): Promise<ExportResult> {
         '-deadline', 'good',
         '-cpu-used', '2',
       ],
+      audioArgs: ['-c:a', 'libopus', '-b:a', '192k'],
     });
   }
 
@@ -48,8 +50,10 @@ export async function exportWebm(job: ExportJob): Promise<ExportResult> {
     alpha: alpha ? 'keep' : 'discard',
   });
   output.addVideoTrack(source, { frameRate: cfg.fps });
+  const audio = await addAudioTrack(output, job, ['opus', 'vorbis']);
   await output.start();
   try {
+    await writeAudio(audio);
     const frames = await renderSequence(
       job,
       async (_c, k) => {

@@ -1,4 +1,5 @@
 import { BufferTarget, CanvasSource, Mp4OutputFormat, Output, canEncodeVideo } from 'mediabunny';
+import { addAudioTrack, writeAudio } from './audio';
 import { ExportCancelled, canvasFactory, exportFilename, renderSequence, type ExportJob, type ExportResult } from './common';
 
 /** ~30 Mbps at 1080p30, scaled by pixel rate. */
@@ -36,9 +37,12 @@ export async function exportMp4(job: ExportJob): Promise<ExportResult> {
     latencyMode: 'quality',
   });
   output.addVideoTrack(source, { frameRate: cfg.fps });
+  // AAC is what editors and social networks expect; Opus in MP4 as a fallback.
+  const audio = await addAudioTrack(output, job, ['aac', 'opus']);
   await output.start();
 
   try {
+    await writeAudio(audio);
     const frames = await renderSequence(
       job,
       async (_c, k) => {

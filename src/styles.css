@@ -1000,3 +1000,78 @@ kbd {
     overflow: visible;
   }
 }
+
+/* Song */
+.song {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.song > svg {
+  color: var(--accent);
+}
+.song div {
+  display: grid;
+  min-width: 0;
+}
+.song b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.song small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.breakdown {
+  display: grid;
+  gap: 6px;
+}
+.breakdown .bar {
+  display: flex;
+  gap: 1px;
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+.breakdown .bar i {
+  min-width: 1px;
+}
+.breakdown .bar .intro {
+  background: var(--intro);
+}
+.breakdown .bar .loop {
+  background: var(--loop);
+  opacity: 0.8;
+}
+.breakdown .bar .outro {
+  background: var(--outro);
+}
+.breakdown p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.breakdown p b {
+  color: var(--text);
+}
+.tab .dot {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.toolbar .segmented > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}

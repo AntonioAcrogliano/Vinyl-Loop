@@ -1,22 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Song } from '../audio/song';
 import { ExportCancelled, canvasFactory, downloadBlob, type ExportJob, type ExportResult } from '../export/common';
 import { getBackground } from '../render/backgrounds';
-import { timingFor } from '../render/scene';
+import { framesFor, timingFor } from '../render/scene';
 import { DEFAULT_CONFIG, DEFAULT_CROP, type SceneConfig } from '../render/types';
+import { fitToDuration, formatDuration, type SongFit } from '../utils/fit';
 import { extractPalette } from '../utils/palette';
 import { BackgroundPanel } from './BackgroundPanel';
 import { ExportPanel, type ExportSettings, type ExportStatus } from './ExportPanel';
 import { Icon, type IconName } from './icons';
 import { ImagePanel, type LoadedImage } from './ImagePanel';
-import { MotionPanel } from './MotionPanel';
+import { MusicPanel } from './MusicPanel';
 import { PresetPanel } from './PresetPanel';
 import { Preview, type PreviewMode } from './Preview';
 import { ScenePanel } from './ScenePanel';
+import { TextPanel } from './TextPanel';
 
-async function loadImage(file: File): Promise<LoadedImage> {
+async function loadImage(file: Blob, name: string): Promise<LoadedImage> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error('Formato no soportado');
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  return { bitmap, name: file.name.replace(/\.[^.]+$/, '') };
+  return { bitmap, name: name.replace(/\.[^.]+$/, '') };
 }
 
 const IDLE: ExportStatus = { running: false, done: 0, total: 0, stage: '', message: '' };
@@ -35,20 +38,27 @@ async function runExport(job: ExportJob): Promise<ExportResult> {
   }
 }
 
-type Tab = 'image' | 'scene' | 'motion' | 'background' | 'presets' | 'export';
+type Tab = 'image' | 'scene' | 'text' | 'music' | 'background' | 'export';
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'image', label: 'Imagen', icon: 'image' },
   { id: 'scene', label: 'Escena', icon: 'scene' },
-  { id: 'motion', label: 'Movimiento', icon: 'motion' },
+  { id: 'text', label: 'Texto', icon: 'text' },
+  { id: 'music', label: 'Música', icon: 'music' },
   { id: 'background', label: 'Fondo', icon: 'background' },
-  { id: 'presets', label: 'Presets', icon: 'presets' },
   { id: 'export', label: 'Exportar', icon: 'export' },
 ];
+
+const isAudio = (f: File) => f.type.startsWith('audio/') || /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i.test(f.name);
 
 export function App() {
   const [cfg, setCfg] = useState<SceneConfig>(DEFAULT_CONFIG);
   const [cover, setCover] = useState<LoadedImage | null>(null);
   const [label, setLabel] = useState<LoadedImage | null>(null);
+  const [song, setSong] = useState<Song | null>(null);
+  const [songLoading, setSongLoading] = useState(false);
+  const [autoFit, setAutoFit] = useState(true);
+  const [typedDuration, setTypedDuration] = useState<number | null>(null);
+  const [includeAudio, setIncludeAudio] = useState(true);
   const [tab, setTab] = useState<Tab>('image');
   const [mode, setMode] = useState<PreviewMode>('introLoop');
   const [playing, setPlaying] = useState(true);
@@ -97,9 +107,48 @@ export function App() {
 
   useEffect(() => {
     if (!toast) return;
-    const id = setTimeout(() => setToast(''), 3500);
+    const id = setTimeout(() => setToast(''), 4000);
     return () => clearTimeout(id);
   }, [toast]);
+
+  // ---------- Song / duration fitting ----------
+  const target = song ? song.duration : typedDuration;
+  const fit = useMemo<SongFit | null>(
+    () => (target ? fitToDuration(target, cfg) : null),
+    // The loop length only depends on these; intro/outro are outputs of the fit.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [target, cfg.fps, cfg.rpm, cfg.targetLoopSeconds],
+  );
+
+  const applyFit = useCallback((f: SongFit) => {
+    setCfg((c) => ({ ...c, introEnabled: true, outroEnabled: true, introSeconds: f.introSeconds, outroSeconds: f.outroSeconds }));
+    setExportSettings((s) => ({ ...s, plan: { intro: true, loops: f.loops, outro: true } }));
+  }, []);
+
+  // With a song and auto-fit on, keep the video exactly as long as the song.
+  useEffect(() => {
+    if (!song || !autoFit || !fit) return;
+    const same =
+      cfg.introEnabled &&
+      cfg.outroEnabled &&
+      Math.round(cfg.introSeconds * cfg.fps) === fit.introFrames &&
+      Math.round(cfg.outroSeconds * cfg.fps) === fit.outroFrames &&
+      exportSettings.plan.loops === fit.loops &&
+      exportSettings.plan.intro &&
+      exportSettings.plan.outro;
+    if (!same) applyFit(fit);
+  }, [song, autoFit, fit, applyFit, cfg.introEnabled, cfg.outroEnabled, cfg.introSeconds, cfg.outroSeconds, cfg.fps, exportSettings.plan]);
+
+  const onFitDuration = (secs: number) => {
+    setTypedDuration(secs);
+    const f = fitToDuration(secs, cfg);
+    if (!f) {
+      setToast('El tema es demasiado corto para una intro, un loop y un outro.');
+      return;
+    }
+    applyFit(f);
+    setToast(`Listo: ${f.loops} loops para ${formatDuration(secs)}.`);
+  };
 
   // Keep the export settings valid for the current scene.
   const mp4Blocked = transparent || mp4Available === false;
@@ -111,32 +160,87 @@ export function App() {
       outro: cfg.outroEnabled && exportSettings.plan.outro,
     },
   };
-
-  const onImage = useCallback(
-    async (kind: 'cover' | 'label', file: File) => {
-      try {
-        const img = await loadImage(file);
-        if (kind === 'cover') {
-          setCover(img);
-          setCfg((c) => ({
-            ...c,
-            coverCrop: DEFAULT_CROP,
-            // A label cut from the cover gets a fresh crop for the new photo.
-            labelCrop: c.label.source === 'image' ? c.labelCrop : DEFAULT_CROP,
-          }));
-          setToast(`Foto cargada: ${img.name}`);
-        } else {
-          setLabel(img);
-          setCfg((c) => ({ ...c, labelCrop: DEFAULT_CROP }));
-        }
-      } catch {
-        setToast(`No pude abrir “${file.name}”. Usá JPG, PNG o WebP.`);
-      }
-    },
-    [],
+  const planFrames = framesFor(timing, effective.plan).length;
+  const songPlan = useMemo(
+    () => (target !== null ? effective.plan : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [target, effective.plan.intro, effective.plan.loops, effective.plan.outro],
   );
 
-  // Drop an image anywhere in the window to use it as the cover.
+  // ---------- Files ----------
+  const onImage = useCallback(async (kind: 'cover' | 'label', file: File) => {
+    try {
+      const img = await loadImage(file, file.name);
+      if (kind === 'cover') {
+        setCover(img);
+        setCfg((c) => ({
+          ...c,
+          coverCrop: DEFAULT_CROP,
+          // A label cut from the cover gets a fresh crop for the new photo.
+          labelCrop: c.label.source === 'image' ? c.labelCrop : DEFAULT_CROP,
+        }));
+        setToast(`Foto cargada: ${img.name}`);
+      } else {
+        setLabel(img);
+        setCfg((c) => ({ ...c, labelCrop: DEFAULT_CROP }));
+      }
+    } catch {
+      setToast(`No pude abrir “${file.name}”. Usá JPG, PNG o WebP.`);
+    }
+  }, []);
+
+  const coverRef = useRef(cover);
+  coverRef.current = cover;
+  const onSongFile = useCallback(async (file: File) => {
+    setSongLoading(true);
+    try {
+      // Loaded on demand: the audio reader (Mediabunny) isn't needed until a song is added.
+      const { loadSong } = await import('../audio/song');
+      const s = await loadSong(file);
+      setSong((old) => {
+        if (old) URL.revokeObjectURL(old.url);
+        return s;
+      });
+      setAutoFit(true);
+      const notes: string[] = [];
+      // Title card from the tags, unless the user already typed something.
+      if (s.title || s.artist) {
+        setCfg((c) => {
+          const untouched = c.text.title === DEFAULT_CONFIG.text.title && c.text.artist === DEFAULT_CONFIG.text.artist;
+          if (!untouched) return c;
+          return { ...c, text: { ...c.text, title: s.title ?? c.text.title, artist: s.artist ?? c.text.artist } };
+        });
+        notes.push('texto completado con los datos del tema');
+      }
+      // Embedded cover art becomes the photo if there is none yet.
+      if (s.cover && !coverRef.current) {
+        try {
+          const img = await loadImage(s.cover, s.name);
+          setCover(img);
+          setCfg((c) => ({ ...c, coverCrop: DEFAULT_CROP, labelCrop: DEFAULT_CROP }));
+          notes.push('se usó la tapa del archivo');
+        } catch {
+          // Unsupported cover image format: ignore.
+        }
+      }
+      setMode('song');
+      setPlaying(false);
+      setRestartKey((k) => k + 1);
+      setToast(`Canción cargada (${formatDuration(s.duration)})${notes.length ? ': ' + notes.join(', ') : ''}. Dale play para escucharla.`);
+    } catch (err) {
+      setToast(`No pude leer “${file.name}”: ${(err as Error).message}`);
+    } finally {
+      setSongLoading(false);
+    }
+  }, []);
+
+  const removeSong = () => {
+    if (song) URL.revokeObjectURL(song.url);
+    setSong(null);
+    if (mode === 'song' && typedDuration === null) setMode('introLoop');
+  };
+
+  // Drop an image (cover) or a song anywhere in the window.
   useEffect(() => {
     let depth = 0;
     const hasFiles = (e: DragEvent) => !!e.dataTransfer && [...e.dataTransfer.types].includes('Files');
@@ -159,7 +263,9 @@ export function App() {
       depth = 0;
       setDragging(false);
       const f = e.dataTransfer?.files[0];
-      if (f) onImage('cover', f);
+      if (!f) return;
+      if (isAudio(f)) onSongFile(f);
+      else onImage('cover', f);
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);
@@ -171,8 +277,9 @@ export function App() {
       window.removeEventListener('dragover', over);
       window.removeEventListener('drop', drop);
     };
-  }, [onImage]);
+  }, [onImage, onSongFile]);
 
+  // ---------- Export ----------
   const onExport = async () => {
     const ac = new AbortController();
     abortRef.current = ac;
@@ -181,7 +288,8 @@ export function App() {
       images,
       plan: effective.plan,
       format: effective.format,
-      name: cover?.name ?? 'vinilo',
+      name: song?.name ?? cover?.name ?? 'vinilo',
+      audio: song && includeAudio ? song.file : undefined,
       signal: ac.signal,
       onProgress: (done, total, stage = '') => setExportStatus({ running: true, done, total, stage, message: '' }),
     };
@@ -208,6 +316,12 @@ export function App() {
   };
 
   const exportProgress = exportStatus.running && exportStatus.total > 0 ? Math.round((exportStatus.done / exportStatus.total) * 100) : null;
+  const modes: [PreviewMode, string, string, boolean][] = [
+    ['loop', 'Loop', 'Solo el loop, repetido: para chequear el empalme', true],
+    ['introLoop', 'Intro + loop', 'La intro una vez y después el loop', cfg.introEnabled],
+    ['full', 'Completo', 'Intro, dos loops y outro', cfg.introEnabled || cfg.outroEnabled],
+  ];
+  if (target !== null) modes.push(['song', song ? 'Canción' : 'Tema', 'El video entero, como se va a exportar' + (song ? ', con la música' : ''), true]);
 
   return (
     <div className="app">
@@ -234,36 +348,67 @@ export function App() {
               <Icon name={t.icon} />
               <span>{t.label}</span>
               {t.id === 'export' && exportProgress !== null && <em className="badge">{exportProgress}%</em>}
+              {t.id === 'music' && song && <em className="dot" aria-label="canción cargada" />}
             </button>
           ))}
         </nav>
         <div className="panel" role="tabpanel">
           {tab === 'image' && <ImagePanel cfg={cfg} update={update} cover={cover} label={label} onImage={onImage} />}
           {tab === 'scene' && <ScenePanel cfg={cfg} update={update} />}
-          {tab === 'motion' && <MotionPanel cfg={cfg} update={update} timing={timing} />}
-          {tab === 'background' && <BackgroundPanel cfg={cfg} update={update} photoPalette={photoPalette} />}
-          {tab === 'presets' && (
-            <PresetPanel
+          {tab === 'text' && (
+            <TextPanel
               cfg={cfg}
-              apply={(p) =>
-                // Crops belong to the current photo, so a preset never overrides them.
-                setCfg((c) => ({ ...p, coverCrop: c.coverCrop, labelCrop: c.labelCrop }))
-              }
+              update={update}
+              songTags={song ? { title: song.title, artist: song.artist } : null}
+              onPreviewAnimation={() => restart('full')}
             />
           )}
-          {tab === 'export' && (
-            <ExportPanel
+          {tab === 'music' && (
+            <MusicPanel
               cfg={cfg}
+              update={update}
               timing={timing}
-              settings={effective}
-              setSettings={setExportSettings}
-              status={exportStatus}
-              transparent={transparent}
-              mp4Available={mp4Available}
-              webmNative={webmNative}
-              onExport={onExport}
-              onCancel={() => abortRef.current?.abort()}
+              song={song}
+              songLoading={songLoading}
+              onSongFile={onSongFile}
+              onRemoveSong={removeSong}
+              target={target}
+              fit={fit}
+              planFrames={planFrames}
+              autoFit={autoFit}
+              setAutoFit={setAutoFit}
+              onFitDuration={onFitDuration}
+              onRefit={() => fit && applyFit(fit)}
             />
+          )}
+          {tab === 'background' && <BackgroundPanel cfg={cfg} update={update} photoPalette={photoPalette} />}
+          {tab === 'export' && (
+            <>
+              <ExportPanel
+                cfg={cfg}
+                timing={timing}
+                settings={effective}
+                setSettings={setExportSettings}
+                status={exportStatus}
+                transparent={transparent}
+                mp4Available={mp4Available}
+                webmNative={webmNative}
+                onExport={onExport}
+                onCancel={() => abortRef.current?.abort()}
+                song={song}
+                includeAudio={includeAudio}
+                setIncludeAudio={setIncludeAudio}
+                fit={fit}
+                onUseFit={() => fit && applyFit(fit)}
+              />
+              <PresetPanel
+                cfg={cfg}
+                apply={(p) =>
+                  // Crops belong to the current photo, so a preset never overrides them.
+                  setCfg((c) => ({ ...p, coverCrop: c.coverCrop, labelCrop: c.labelCrop }))
+                }
+              />
+            </>
           )}
         </div>
       </aside>
@@ -271,13 +416,7 @@ export function App() {
       <main className="main">
         <div className="toolbar">
           <div className="segmented" role="radiogroup" aria-label="Qué reproducir">
-            {(
-              [
-                ['loop', 'Loop', 'Solo el loop, repetido: para chequear el empalme'],
-                ['introLoop', 'Intro + loop', 'La intro una vez y después el loop'],
-                ['full', 'Completo', 'Intro, dos loops y outro'],
-              ] as const
-            ).map(([m, name, title]) => (
+            {modes.map(([m, name, title, enabled]) => (
               <button
                 key={m}
                 type="button"
@@ -285,10 +424,10 @@ export function App() {
                 aria-checked={mode === m}
                 className={mode === m ? 'on' : ''}
                 title={title}
-                disabled={(m === 'introLoop' && !cfg.introEnabled) || (m === 'full' && !cfg.introEnabled && !cfg.outroEnabled)}
+                disabled={!enabled}
                 onClick={() => restart(m)}
               >
-                {name}
+                {m === 'song' && <Icon name="music" size={13} />} {name}
               </button>
             ))}
           </div>
@@ -307,12 +446,14 @@ export function App() {
         <Preview
           cfg={cfg}
           images={images}
-          mode={mode}
+          mode={mode === 'song' && target === null ? 'introLoop' : mode}
           playing={playing}
           setPlaying={setPlaying}
           restartKey={restartKey}
           hasPhoto={!!cover}
           onPickPhoto={() => fileRef.current?.click()}
+          songUrl={song?.url ?? null}
+          songPlan={songPlan}
         />
       </main>
 
@@ -331,7 +472,7 @@ export function App() {
         <div className="drop-overlay" aria-hidden>
           <div>
             <Icon name="upload" size={32} />
-            <b>Soltá la imagen para usarla de portada</b>
+            <b>Soltá una imagen (portada) o una canción</b>
           </div>
         </div>
       )}

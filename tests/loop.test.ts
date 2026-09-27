@@ -4,6 +4,7 @@ import { BACKGROUNDS, resolveParams, type Background } from '../src/render/backg
 import { LABEL_PRESETS, drawLabelPreset } from '../src/render/labels';
 import { placement } from '../src/render/layout';
 import { buildAssets, framesFor, planTag, renderFrame, timingFor } from '../src/render/scene';
+import { textPhase } from '../src/render/text';
 import { frameState, type FrameRef } from '../src/render/timing';
 import {
   DEFAULT_CONFIG,
@@ -84,6 +85,14 @@ const variants: [string, Partial<SceneConfig>][] = [
     vinyl: { ...DEFAULT_CONFIG.vinyl, style: 'translucent', wobble: 0.5 },
     sleeve: { ...DEFAULT_CONFIG.sleeve, wear: 1, innerSleeve: true },
     overlays: { grain: 0.5, vignette: 0.5 },
+  }],
+  ['title card (letters in, slide out), 24 fps, short intro', {
+    fps: 24,
+    introSeconds: 0.5,
+    text: { ...DEFAULT_CONFIG.text, enabled: true, animIn: 'letters', animOut: 'slide', position: 'topLeft' },
+  }],
+  ['title card typewriter, bottom, serif', {
+    text: { ...DEFAULT_CONFIG.text, enabled: true, animIn: 'typewriter', animOut: 'wipe', font: 'serif', uppercase: true },
   }],
   ['die-cut kraft sleeve, standard label, outro', {
     sleeve: { ...DEFAULT_CONFIG.sleeve, style: 'dieCut', material: 'kraft' },
@@ -267,5 +276,28 @@ describe('die-cut sleeve and standard labels', () => {
     const migrated = normalizeConfig({ useSeparateLabel: true } as Partial<SceneConfig>);
     expect(migrated.label.source).toBe('image');
     expect('useSeparateLabel' in migrated).toBe(false);
+  });
+});
+
+describe('title card timing', () => {
+  it('is fully visible through the loop and at both splices, for every animation', () => {
+    for (const anim of ['fade', 'slide', 'wipe', 'typewriter', 'letters'] as const) {
+      for (const [fps, intro] of [[24, 0.5], [30, 2.5], [60, 1]] as const) {
+        const cfg = normalizeConfig({ ...DEFAULT_CONFIG, fps, introSeconds: intro, outroEnabled: true, text: { ...DEFAULT_CONFIG.text, enabled: true, animIn: anim, animOut: anim } });
+        const t = timingFor(cfg);
+        expect(textPhase(cfg, frameState(t, t.I - 1), t).e).toBe(1);
+        expect(textPhase(cfg, frameState(t, { seg: 'loop', i: 7 }), t).e).toBe(1);
+        expect(textPhase(cfg, frameState(t, { seg: 'outro', i: 0 }), t).e).toBe(1);
+        expect(textPhase(cfg, frameState(t, { seg: 'intro', i: 0 }), t).e).toBe(0);
+        expect(textPhase(cfg, frameState(t, { seg: 'outro', i: t.O - 1 }), t).e).toBe(0);
+      }
+    }
+  });
+
+  it('the text is really drawn (pixels change when enabled)', () => {
+    const base = cfgWith(BACKGROUNDS[1], {});
+    const withText = cfgWith(BACKGROUNDS[1], { text: { ...DEFAULT_CONFIG.text, enabled: true, color: '#ff00ff' } });
+    const t = timingFor(base);
+    expect(diffCount(render(base, t.I + 3), render(withText, t.I + 3))).toBeGreaterThan(200);
   });
 });
