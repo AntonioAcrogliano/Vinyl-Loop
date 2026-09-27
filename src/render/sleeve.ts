@@ -1,6 +1,7 @@
 import { mulberry32 } from '../utils/prng';
 import { drawCropped } from './crop';
-import type { AnyCanvas, CanvasFactory, Crop, Ctx2D, Direction, ImageLike, Sprite } from './types';
+import { DISC_TO_SLEEVE } from './layout';
+import type { AnyCanvas, CanvasFactory, CoverStyle, Crop, Ctx2D, Direction, ImageLike, SleeveMaterial, Sprite } from './types';
 
 export interface SleeveOptions {
   size: number;
@@ -10,6 +11,57 @@ export interface SleeveOptions {
   direction: Direction;
   /** Ring wear, rubbed edges and aging, 0..1. */
   wear?: number;
+  style?: CoverStyle;
+  material?: SleeveMaterial;
+  /** Used by the "color" material. */
+  color?: string;
+  /** Die-cut hole radius as a fraction of the sleeve side. */
+  holeRadius?: number;
+}
+
+/** Die-cut hole: a bit larger than the label, so the whole label shows when the disc is inside. */
+export function holeRadiusFor(labelSize: number): number {
+  return ((DISC_TO_SLEEVE * labelSize) / 2) * 1.1;
+}
+
+const MATERIAL_BASE: Record<Exclude<SleeveMaterial, 'photo' | 'color'>, string> = {
+  kraft: '#b08555',
+  white: '#f1eee7',
+  black: '#1d1d1f',
+};
+
+function materialColor(material: SleeveMaterial, color: string): string {
+  if (material === 'color') return /^#[0-9a-f]{6}$/i.test(color) ? color : '#2f4858';
+  if (material === 'photo') return '#d8d1c3';
+  return MATERIAL_BASE[material];
+}
+
+/** Flat paper with seeded grain and a few fibers (strength ~ how rough the paper is). */
+function drawPaper(ctx: Ctx2D, size: number, base: string, strength: number, seed: number): void {
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, size, size);
+  const rand = mulberry32(seed);
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (rand() + rand() - 1) * strength;
+    d[i] += n;
+    d[i + 1] += n;
+    d[i + 2] += n;
+  }
+  ctx.putImageData(img, 0, 0);
+  ctx.lineWidth = Math.max(0.5, size * 0.0012);
+  for (let k = 0; k < Math.round(strength * 12); k++) {
+    const x = rand() * size;
+    const y = rand() * size;
+    const a = rand() * Math.PI;
+    const l = size * (0.01 + rand() * 0.04);
+    ctx.strokeStyle = rand() < 0.5 ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.08)';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
+    ctx.stroke();
+  }
 }
 
 export function sleeveRadius(size: number): number {
@@ -40,11 +92,17 @@ export function buildSleeveCanvas(factory: CanvasFactory, opts: SleeveOptions): 
   ctx.save();
   roundRectPath(ctx, 0, 0, size, size, rad);
   ctx.clip();
-  if (opts.cover) {
-    ctx.imageSmoothingQuality = 'high';
-    drawCropped(ctx, opts.cover, opts.crop, 0, 0, size);
+  const dieCut = opts.style === 'dieCut';
+  const material = opts.material ?? 'kraft';
+  if (!dieCut || material === 'photo') {
+    if (opts.cover) {
+      ctx.imageSmoothingQuality = 'high';
+      drawCropped(ctx, opts.cover, opts.crop, 0, 0, size);
+    } else {
+      drawPlaceholderCover(ctx, size);
+    }
   } else {
-    drawPlaceholderCover(ctx, size);
+    drawPaper(ctx, size, materialColor(material, opts.color ?? ''), material === 'kraft' ? 14 : 5, 0x5ee7);
   }
   if (opts.wear && opts.wear > 0) drawWear(ctx, size, opts.wear);
 
@@ -75,11 +133,50 @@ export function buildSleeveCanvas(factory: CanvasFactory, opts: SleeveOptions): 
   edge(x0, y0, x1, y1, 0.35);
   ctx.restore();
 
+  if (dieCut) {
+    const c = size / 2;
+    const hr = (opts.holeRadius ?? 0.17) * size;
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.beginPath();
+    ctx.arc(c, c, hr, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    // Cut edge: thin dark rim plus a faint highlight where the light hits the paper thickness.
+    ctx.lineWidth = Math.max(1, size * 0.004);
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath();
+    ctx.arc(c, c, hr, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = Math.max(0.5, size * 0.0015);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath();
+    ctx.arc(c, c, hr + size * 0.003, Math.PI * 0.9, Math.PI * 1.6);
+    ctx.stroke();
+  }
+
   // Fine outline.
   roundRectPath(ctx, 0.5, 0.5, size - 1, size - 1, rad);
   ctx.lineWidth = 1;
   ctx.strokeStyle = 'rgba(0,0,0,0.25)';
   ctx.stroke();
+  return canvas;
+}
+
+/**
+ * Inside of a die-cut sleeve: the back panel seen through the hole once the disc is out.
+ * Darker than the front because the front panel shades it.
+ */
+export function buildSleeveBackCanvas(factory: CanvasFactory, size: number, material: SleeveMaterial, color: string): AnyCanvas {
+  const s = Math.max(16, Math.round(size));
+  const canvas = factory(s, s);
+  const ctx = canvas.getContext('2d') as Ctx2D;
+  drawPaper(ctx, s, materialColor(material, color), material === 'kraft' ? 12 : 4, 0xbac4);
+  const g = ctx.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s * 0.7);
+  g.addColorStop(0, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0.45)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, s, s);
   return canvas;
 }
 

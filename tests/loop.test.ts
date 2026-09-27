@@ -1,6 +1,8 @@
 import { createCanvas, type Canvas } from '@napi-rs/canvas';
 import { describe, expect, it } from 'vitest';
 import { BACKGROUNDS, resolveParams, type Background } from '../src/render/backgrounds';
+import { LABEL_PRESETS, drawLabelPreset } from '../src/render/labels';
+import { placement } from '../src/render/layout';
 import { buildAssets, framesFor, planTag, renderFrame, timingFor } from '../src/render/scene';
 import { frameState, type FrameRef } from '../src/render/timing';
 import {
@@ -80,8 +82,12 @@ const variants: [string, Partial<SceneConfig>][] = [
   ['solo layout, translucent, wear + paper', {
     layout: 'solo',
     vinyl: { ...DEFAULT_CONFIG.vinyl, style: 'translucent', wobble: 0.5 },
-    sleeve: { wear: 1, innerSleeve: true },
+    sleeve: { ...DEFAULT_CONFIG.sleeve, wear: 1, innerSleeve: true },
     overlays: { grain: 0.5, vignette: 0.5 },
+  }],
+  ['die-cut kraft sleeve, standard label, outro', {
+    sleeve: { ...DEFAULT_CONFIG.sleeve, style: 'dieCut', material: 'kraft' },
+    label: { ...DEFAULT_CONFIG.label, source: 'preset', preset: 'sunburst' },
   }],
 ];
 
@@ -221,5 +227,45 @@ describe('determinism', () => {
     const cfg = cfgWith(BACKGROUNDS[3], { overlays: { grain: 1, vignette: 0.5 } });
     expect(diffCount(render(cfg, 37), render(cfg, 37))).toBe(0);
     expect(diffCount(render(cfg, { seg: 'outro', i: 12 }), render(cfg, { seg: 'outro', i: 12 }))).toBe(0);
+  });
+});
+
+describe('die-cut sleeve and standard labels', () => {
+  const bg = BACKGROUNDS[1];
+
+  it('the label shows through the hole while the disc is inside', () => {
+    const cfg = cfgWith(bg, {
+      shadow: 0,
+      sleeve: { ...DEFAULT_CONFIG.sleeve, style: 'dieCut', material: 'kraft' },
+      label: { ...DEFAULT_CONFIG.label, source: 'preset', preset: 'minimal', color: '#00ff00', title: '', subtitle: '' },
+    });
+    const px = render(cfg, { seg: 'intro', i: 0 });
+    const l = placement(cfg, W, H, 0);
+    // Halfway between the spindle hole and the label edge, the minimal label is flat green.
+    const r = (l.D * cfg.vinyl.labelSize) / 2;
+    const x = Math.round(l.sleeveX + r * 0.55);
+    const y = Math.round(l.sleeveY);
+    const o = (y * W + x) * 4;
+    expect(px[o + 1]).toBeGreaterThan(200);
+    expect(px[o]).toBeLessThan(60);
+    // A full cover hides it.
+    const full = render({ ...cfg, sleeve: { ...cfg.sleeve, style: 'full' } }, { seg: 'intro', i: 0 });
+    expect(full[o + 1]).toBeLessThan(200);
+  });
+
+  it('every standard label renders and they all look different', () => {
+    const sigs = LABEL_PRESETS.map((p) => {
+      const c = createCanvas(64, 64);
+      const ctx = c.getContext('2d') as unknown as Ctx2D;
+      drawLabelPreset(ctx, 32, 32, 30, p.id, '', { title: 'Título', subtitle: 'Artista', rpm: '33⅓ RPM' });
+      return Array.from(c.getContext('2d').getImageData(0, 0, 64, 64).data.filter((_, i) => i % 97 === 0)).join();
+    });
+    expect(new Set(sigs).size).toBe(LABEL_PRESETS.length);
+  });
+
+  it('old presets with useSeparateLabel migrate to label.source = image', () => {
+    const migrated = normalizeConfig({ useSeparateLabel: true } as Partial<SceneConfig>);
+    expect(migrated.label.source).toBe('image');
+    expect('useSeparateLabel' in migrated).toBe(false);
   });
 });

@@ -1,10 +1,19 @@
 import { getBackground, resolveParams } from './backgrounds';
 import { placement } from './layout';
 import { buildGrainTiles, drawOverlays } from './overlays';
-import { buildPaperCanvas, buildShadowSprite, buildSleeveCanvas, roundRectPath, sleeveRadius } from './sleeve';
+import { rpmText } from './labels';
+import {
+  buildPaperCanvas,
+  buildShadowSprite,
+  buildSleeveBackCanvas,
+  buildSleeveCanvas,
+  holeRadiusFor,
+  roundRectPath,
+  sleeveRadius,
+} from './sleeve';
 import { TAU, frameState, getTiming, type FrameRef, type Timing } from './timing';
 import type { AnyCanvas, CanvasFactory, Ctx2D, ImageLike, SceneAssets, SceneConfig, Sprite } from './types';
-import { buildDiscCanvas, drawSheen } from './vinyl';
+import { buildDiscCanvas, drawSheen, type LabelArt } from './vinyl';
 
 export function timingFor(cfg: SceneConfig): Timing {
   return getTiming({
@@ -18,8 +27,25 @@ export function timingFor(cfg: SceneConfig): Timing {
 
 export interface SceneImages {
   cover: ImageLike | null;
-  /** Separate label image; falls back to the cover. */
+  /** Separate label image (label.source = 'image'). */
   label: ImageLike | null;
+}
+
+/**
+ * What goes on the label. A photo source without a photo falls back to the standard design,
+ * so the app looks finished before anything is uploaded.
+ */
+export function labelArtFor(cfg: SceneConfig, images: SceneImages): LabelArt {
+  const src = cfg.label.source;
+  // The label has its own crop even when it uses the cover photo (e.g. to center a face).
+  if (src === 'cover' && images.cover) return { kind: 'image', image: images.cover, crop: cfg.labelCrop };
+  if (src === 'image' && images.label) return { kind: 'image', image: images.label, crop: cfg.labelCrop };
+  return {
+    kind: 'preset',
+    preset: cfg.label.preset,
+    color: cfg.label.color,
+    texts: { title: cfg.label.title, subtitle: cfg.label.subtitle, rpm: rpmText(cfg.rpm) },
+  };
 }
 
 /** Largest bitmap cache size for the disc; bigger outputs just upscale slightly. */
@@ -39,12 +65,9 @@ export function buildAssets(
   factory: CanvasFactory,
 ): SceneAssets {
   const l = placement(cfg, W, H, 1);
-  const labelImg = cfg.useSeparateLabel && images.label ? images.label : images.cover;
-  const labelCrop = cfg.useSeparateLabel && images.label ? cfg.labelCrop : cfg.coverCrop;
   const disc = buildDiscCanvas(factory, {
     size: Math.min(MAX_DISC_CACHE, Math.ceil(l.D)),
-    label: labelImg,
-    labelCrop,
+    label: labelArtFor(cfg, images),
     labelSize: cfg.vinyl.labelSize,
     style: cfg.vinyl.style,
     color: cfg.vinyl.color,
@@ -55,7 +78,13 @@ export function buildAssets(
     crop: cfg.coverCrop,
     direction: cfg.direction,
     wear: cfg.sleeve.wear,
+    style: cfg.sleeve.style,
+    material: cfg.sleeve.material,
+    color: cfg.sleeve.color,
+    holeRadius: holeRadiusFor(cfg.vinyl.labelSize),
   });
+  const sleeveBack =
+    cfg.sleeve.style === 'dieCut' ? buildSleeveBackCanvas(factory, l.S, cfg.sleeve.material, cfg.sleeve.color) : null;
   const paper = cfg.sleeve.innerSleeve ? buildPaperCanvas(factory, l.S * PAPER_SCALE) : null;
   const blur = Math.min(W, H) * 0.035;
   const sleeveShadow = buildShadowSprite(factory, l.S, l.S, blur, (ctx, x, y, w, h) => {
@@ -68,7 +97,7 @@ export function buildAssets(
     ctx.fill();
   });
   if (!grainCache || grainCache.factory !== factory) grainCache = { factory, tiles: buildGrainTiles(factory) };
-  return { width: W, height: H, disc, sleeve, paper, discShadow, sleeveShadow, grainTiles: grainCache.tiles };
+  return { width: W, height: H, disc, sleeve, sleeveBack, paper, discShadow, sleeveShadow, grainTiles: grainCache.tiles };
 }
 
 function drawSprite(ctx: Ctx2D, s: Sprite, cx: number, cy: number, w: number, h: number): void {
@@ -140,6 +169,20 @@ export function renderFrame(ctx: Ctx2D, frame: number | FrameRef, cfg: SceneConf
     ctx.restore();
   };
 
+  const holeR = holeRadiusFor(cfg.vinyl.labelSize) * l.S;
+
+  // Inside of a die-cut sleeve, seen through the hole (behind the disc).
+  const drawSleeveBack = () => {
+    if (!assets.sleeveBack || !sleeveVisible) return;
+    ctx.save();
+    ctx.globalAlpha = l.sleeveAlpha;
+    ctx.beginPath();
+    ctx.arc(l.sleeveX, l.sleeveY, holeR + 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(assets.sleeveBack, l.sleeveX - l.S / 2, l.sleeveY - l.S / 2, l.S, l.S);
+    ctx.restore();
+  };
+
   const drawSleeve = () => {
     if (!sleeveVisible) return;
     ctx.save();
@@ -162,10 +205,12 @@ export function renderFrame(ctx: Ctx2D, frame: number | FrameRef, cfg: SceneConf
 
   // 3–4. Disc and sleeve. The disc goes over the sleeve only once they no longer overlap.
   if (l.discFront) {
+    drawSleeveBack();
     drawPaper();
     drawSleeve();
     drawDisc();
   } else {
+    drawSleeveBack();
     drawPaper();
     drawDisc();
     // The sleeve casts a soft shadow onto the disc.
@@ -174,6 +219,13 @@ export function renderFrame(ctx: Ctx2D, frame: number | FrameRef, cfg: SceneConf
       ctx.beginPath();
       ctx.arc(l.discX, l.discY + bob, l.D / 2, 0, Math.PI * 2);
       ctx.clip();
+      if (assets.sleeveBack) {
+        // Not through the die-cut hole: the label must stay visible there.
+        ctx.beginPath();
+        ctx.rect(0, 0, W, H);
+        ctx.arc(l.sleeveX, l.sleeveY, holeR, 0, Math.PI * 2);
+        ctx.clip('evenodd');
+      }
       ctx.globalAlpha = shadowAlpha * 0.6 * l.sleeveAlpha;
       drawSprite(ctx, assets.sleeveShadow, l.sleeveX, l.sleeveY + shadowY * 0.5, l.S, l.S);
       ctx.restore();

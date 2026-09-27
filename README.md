@@ -11,7 +11,9 @@ npm run build    # typecheck + build estático en dist/
 
 ## Funcionalidades (fases 1–3)
 
-- **Foto**: drag & drop, recorte de tapa (cuadrado) y etiqueta (círculo), imagen aparte opcional para la etiqueta.
+- **Foto**: se suelta en cualquier parte de la ventana; recorte de tapa (cuadrado) y de galleta (círculo), independientes.
+- **Portada**: foto completa o sobre con agujero (kraft, blanco, negro, color o la foto troquelada). Por el agujero se ve la galleta mientras el disco está adentro, y el interior del sobre cuando sale.
+- **Galleta**: foto de tapa, otra imagen o uno de 8 diseños estándar (`src/render/labels.ts`) con título, subtítulo, color base y las RPM reales.
 - **Layouts**: semi-afuera, afuera al lado, disco solo (el sobre se va deslizándose o desvaneciéndose). El disco sale a la derecha, la izquierda o arriba.
 - **Vinilo**: negro, color sólido o translúcido; surcos procedurales, brillo fijo, etiqueta que rota y wobble opcional (una oscilación por vuelta).
 - **Sobre**: desgaste 0–100 (ring wear, bordes gastados, amarilleo) y funda interior de papel opcional.
@@ -29,6 +31,10 @@ npm run build    # typecheck + build estático en dist/
 | ProRes 4444 .mov | ✓ | ffmpeg.wasm (`prores_ks`, `yuva444p`) |
 
 ffmpeg.wasm usa el core single-thread (no necesita headers COOP/COEP), se sirve desde el propio origen (sin CDN) y se descarga (~32 MB) solo la primera vez que se usa ProRes o el fallback de WebM.
+
+## Interfaz
+
+Panel por pestañas (Imagen, Escena, Movimiento, Fondo, Presets, Exportar), timeline con los segmentos intro / loop / outro (clic o arrastre para ir a un frame) y atajos: **Espacio** play/pausa, **← →** un frame, **Shift + ← →** un segundo, **Inicio** vuelve al principio.
 
 ## Cómo está armado
 

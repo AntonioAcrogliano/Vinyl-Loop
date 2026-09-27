@@ -7,6 +7,11 @@ export type Direction = 'right' | 'left' | 'up';
 /** semi: disc half out · side: disc fully out, slightly overlapping · solo: sleeve leaves, loop is just the disc. */
 export type LayoutId = 'semi' | 'side' | 'solo';
 export type VinylStyle = 'black' | 'color' | 'translucent';
+/** full: the photo is the whole jacket · dieCut: paper sleeve with a round hole showing the label. */
+export type CoverStyle = 'full' | 'dieCut';
+export type SleeveMaterial = 'kraft' | 'white' | 'black' | 'color' | 'photo';
+/** cover: label uses the cover photo · image: a separate image · preset: a standard label design. */
+export type LabelSource = 'cover' | 'image' | 'preset';
 
 /** Square crop: center in normalized image coords, zoom ≥ 1 (1 = largest square that fits). */
 export interface Crop {
@@ -63,6 +68,11 @@ export interface SceneConfig {
     wobble: number;
   };
   sleeve: {
+    style: CoverStyle;
+    /** Die-cut sleeve material. */
+    material: SleeveMaterial;
+    /** Used by the "color" material. */
+    color: string;
     /** Ring wear and worn edges, 0..1. */
     wear: number;
     /** White paper inner sleeve peeking out of the opening. */
@@ -70,9 +80,17 @@ export interface SceneConfig {
   };
   /** Shadow intensity 0..1. */
   shadow: number;
+  label: {
+    source: LabelSource;
+    /** Standard label design id (see labels.ts). */
+    preset: string;
+    /** Base color override for the preset; empty = the preset's own color. */
+    color: string;
+    title: string;
+    subtitle: string;
+  };
   coverCrop: Crop;
   labelCrop: Crop;
-  useSeparateLabel: boolean;
 }
 
 export interface Sprite {
@@ -88,6 +106,8 @@ export interface SceneAssets {
   /** Grooves + label + hole, drawn rotated each frame. */
   disc: AnyCanvas;
   sleeve: AnyCanvas;
+  /** Inside of the sleeve, seen through the die-cut hole (null for full covers). */
+  sleeveBack: AnyCanvas | null;
   paper: AnyCanvas | null;
   discShadow: Sprite;
   sleeveShadow: Sprite;
@@ -116,19 +136,23 @@ export const DEFAULT_CONFIG: SceneConfig = {
   background: { id: 'solid', palette: ['#e9e4da', '#c8322d', '#1d3557', '#f1c453', '#2a9d8f'], paletteFromPhoto: false, params: {} },
   overlays: { grain: 0, vignette: 0 },
   vinyl: { style: 'black', color: '#b3202a', sheen: 0.6, labelSize: 0.33, wobble: 0 },
-  sleeve: { wear: 0, innerSleeve: false },
+  sleeve: { style: 'full', material: 'kraft', color: '#2f4858', wear: 0, innerSleeve: false },
   shadow: 0.6,
   coverCrop: DEFAULT_CROP,
+  label: { source: 'cover', preset: 'classic', color: '', title: 'Vinilo Loop', subtitle: 'Lado A' },
   labelCrop: DEFAULT_CROP,
-  useSeparateLabel: false,
 };
 
 /** Fills in fields missing from older presets / partial configs. */
-export function normalizeConfig(c: Partial<SceneConfig>): SceneConfig {
+export function normalizeConfig(c: Partial<SceneConfig> & { useSeparateLabel?: boolean }): SceneConfig {
   const d = DEFAULT_CONFIG;
+  // Older presets had a boolean "useSeparateLabel" instead of label.source.
+  const { useSeparateLabel, ...rest } = c;
+  const label = { ...d.label, ...(useSeparateLabel ? { source: 'image' as const } : {}), ...c.label };
   return {
     ...d,
-    ...c,
+    ...rest,
+    label,
     background: { ...d.background, ...c.background },
     overlays: { ...d.overlays, ...c.overlays },
     vinyl: { ...d.vinyl, ...c.vinyl },

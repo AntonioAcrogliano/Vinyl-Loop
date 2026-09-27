@@ -1,18 +1,12 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 
-export function Section({ title, children, defaultOpen = true }: { title: string; children: ReactNode; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
+/** A titled group of controls inside a tab. */
+export function Section({ title, children, hint }: { title: string; children: ReactNode; hint?: ReactNode }) {
   return (
-    <section className={open ? 'section' : 'section closed'}>
-      <h2>
-        <button className="section-toggle" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-          <span>{title}</span>
-          <span className="chev" aria-hidden>
-            {open ? '−' : '+'}
-          </span>
-        </button>
-      </h2>
-      {open && children}
+    <section className="section">
+      <h2>{title}</h2>
+      {children}
+      {hint && <p className="hint">{hint}</p>}
     </section>
   );
 }
@@ -26,6 +20,7 @@ export function Slider(props: {
   onChange: (v: number) => void;
   format?: (v: number) => string;
 }) {
+  const pct = ((props.value - props.min) / (props.max - props.min)) * 100;
   return (
     <label className="row">
       <span>{props.label}</span>
@@ -35,6 +30,7 @@ export function Slider(props: {
         max={props.max}
         step={props.step}
         value={props.value}
+        style={{ '--fill': `${pct}%` } as React.CSSProperties}
         onChange={(e) => props.onChange(Number(e.target.value))}
       />
       <output>{props.format ? props.format(props.value) : props.value}</output>
@@ -66,17 +62,69 @@ export function Select<T extends string | number>(props: {
   );
 }
 
-export function Check(props: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+/** Row of mutually exclusive buttons; better than a select for 2–5 short options. */
+export function Segmented<T extends string | number>(props: {
+  label?: string;
+  value: T;
+  options: { value: T; label: ReactNode; title?: string; disabled?: boolean }[];
+  onChange: (v: T) => void;
+  full?: boolean;
+}) {
+  const control = (
+    <div className={props.full ? 'segmented full' : 'segmented'} role="radiogroup" aria-label={props.label}>
+      {props.options.map((o) => (
+        <button
+          key={String(o.value)}
+          type="button"
+          role="radio"
+          aria-checked={o.value === props.value}
+          className={o.value === props.value ? 'on' : ''}
+          title={o.title}
+          disabled={o.disabled}
+          onClick={() => props.onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+  if (!props.label) return control;
   return (
-    <label className={props.disabled ? 'check disabled' : 'check'}>
+    <div className="row seg-row">
+      <span>{props.label}</span>
+      {control}
+    </div>
+  );
+}
+
+export function Check(props: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; hint?: string }) {
+  return (
+    <label className={props.disabled ? 'check disabled' : 'check'} title={props.hint}>
       <input
         type="checkbox"
         checked={props.checked}
         disabled={props.disabled}
         onChange={(e) => props.onChange(e.target.checked)}
       />
+      <span className="switch" aria-hidden />
       {props.label}
     </label>
+  );
+}
+
+export function ColorField({ label, value, onChange, onReset }: { label: string; value: string; onChange: (v: string) => void; onReset?: () => void }) {
+  return (
+    <div className="row color-row">
+      <span>{label}</span>
+      <input type="color" value={value} onChange={(e) => onChange(e.target.value)} />
+      {onReset ? (
+        <button type="button" className="link" onClick={onReset}>
+          Restablecer
+        </button>
+      ) : (
+        <span />
+      )}
+    </div>
   );
 }
 

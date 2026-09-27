@@ -18,7 +18,7 @@ export function PresetPanel({ cfg, apply }: Props) {
   const refresh = () => setPresets(listPresets());
 
   return (
-    <Section title="Presets" defaultOpen={false}>
+    <Section title="Presets" hint="Guardan toda la configuración (no las imágenes). Los recortes actuales se mantienen al cargar.">
       <div className="row pair2">
         <input type="text" placeholder="Nombre del preset" value={name} onChange={(e) => setName(e.target.value)} />
         <button

@@ -1,5 +1,6 @@
 import { mulberry32 } from '../utils/prng';
 import { drawCropped } from './crop';
+import { drawLabelPreset, type LabelTexts } from './labels';
 import type { AnyCanvas, CanvasFactory, Crop, Ctx2D, ImageLike, VinylStyle } from './types';
 
 // Radii as fractions of the disc radius.
@@ -8,10 +9,14 @@ const LEAD_IN = 0.955;
 const RIM = 0.988;
 const RUN_OUT = 0.06;
 
+/** What is printed on the label: a cropped photo or a standard design. */
+export type LabelArt =
+  | { kind: 'image'; image: ImageLike; crop: Crop }
+  | { kind: 'preset'; preset: string; color: string; texts: LabelTexts };
+
 export interface DiscOptions {
   size: number;
-  label: ImageLike | null;
-  labelCrop: Crop;
+  label: LabelArt;
   /** Label diameter as a fraction of the disc diameter. */
   labelSize: number;
   style?: VinylStyle;
@@ -131,17 +136,17 @@ export function buildDiscCanvas(factory: CanvasFactory, opts: DiscOptions): AnyC
   }
   ctx.putImageData(img, 0, 0);
 
-  // Label (photo cropped to a circle).
+  // Label: photo cropped to a circle, or a standard design.
   const lr = labelR * R;
   ctx.save();
   ctx.beginPath();
   ctx.arc(R, R, lr, 0, Math.PI * 2);
   ctx.clip();
-  if (opts.label) {
+  if (opts.label.kind === 'image') {
     ctx.imageSmoothingQuality = 'high';
-    drawCropped(ctx, opts.label, opts.labelCrop, R - lr, R - lr, lr * 2);
+    drawCropped(ctx, opts.label.image, opts.label.crop, R - lr, R - lr, lr * 2);
   } else {
-    drawPlaceholderLabel(ctx, R, lr);
+    drawLabelPreset(ctx, R, R, lr, opts.label.preset, opts.label.color, opts.label.texts);
   }
   // Soft shading so the label reads as a slightly glossy printed paper.
   const shade = ctx.createRadialGradient(R, R, lr * 0.2, R, R, lr);
@@ -168,19 +173,6 @@ export function buildDiscCanvas(factory: CanvasFactory, opts: DiscOptions): AnyC
   ctx.restore();
 
   return canvas;
-}
-
-function drawPlaceholderLabel(ctx: Ctx2D, R: number, lr: number): void {
-  ctx.fillStyle = '#c8322d';
-  ctx.fillRect(R - lr, R - lr, lr * 2, lr * 2);
-  ctx.beginPath();
-  ctx.arc(R, R, lr * 0.62, 0, Math.PI * 2);
-  ctx.lineWidth = lr * 0.05;
-  ctx.strokeStyle = '#efe3c6';
-  ctx.stroke();
-  ctx.fillStyle = '#efe3c6';
-  ctx.fillRect(R - lr * 0.8, R - lr * 0.34, lr * 0.45, lr * 0.08);
-  ctx.fillRect(R + lr * 0.35, R - lr * 0.34, lr * 0.45, lr * 0.08);
 }
 
 /**
