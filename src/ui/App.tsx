@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Song } from '../audio/song';
 import { ExportCancelled, canvasFactory, downloadBlob, type ExportJob, type ExportResult } from '../export/common';
 import { getBackground } from '../render/backgrounds';
@@ -71,15 +71,16 @@ async function runExport(job: ExportJob): Promise<ExportResult> {
 }
 
 type Tab = 'image' | 'scene' | 'text' | 'music' | 'lyrics' | 'background' | 'thumb' | 'export';
-const TABS: { id: Tab; label: string; icon: IconName }[] = [
-  { id: 'image', label: 'Imagen', icon: 'image' },
-  { id: 'scene', label: 'Escena', icon: 'scene' },
-  { id: 'text', label: 'Texto', icon: 'text' },
-  { id: 'music', label: 'Música', icon: 'music' },
-  { id: 'lyrics', label: 'Letra', icon: 'mic' },
-  { id: 'background', label: 'Fondo', icon: 'background' },
-  { id: 'thumb', label: 'Miniatura', icon: 'thumb' },
-  { id: 'export', label: 'Exportar', icon: 'export' },
+/** In workflow order, in three groups: the look, the sound, the output. */
+const TABS: { id: Tab; label: string; icon: IconName; group: number; title: string; desc: string }[] = [
+  { id: 'image', label: 'Imagen', icon: 'image', group: 0, title: 'Imagen', desc: 'Tu foto, la funda y la galleta del disco.' },
+  { id: 'scene', label: 'Escena', icon: 'scene', group: 0, title: 'Escena', desc: 'Cómo sale el disco, su tamaño, el vinilo y las sombras.' },
+  { id: 'background', label: 'Fondo', icon: 'background', group: 0, title: 'Fondo', desc: 'Colores, degradados y texturas detrás del disco.' },
+  { id: 'text', label: 'Texto', icon: 'text', group: 0, title: 'Texto', desc: 'El nombre del tema y del artista, con animación.' },
+  { id: 'music', label: 'Música', icon: 'music', group: 1, title: 'Música', desc: 'Subí la canción y el video dura lo mismo que el tema.' },
+  { id: 'lyrics', label: 'Letra', icon: 'mic', group: 1, title: 'Letra', desc: 'Karaoke sincronizado con la canción.' },
+  { id: 'thumb', label: 'Miniatura', icon: 'thumb', group: 2, title: 'Miniatura', desc: 'La portada del video para YouTube.' },
+  { id: 'export', label: 'Exportar', icon: 'export', group: 2, title: 'Exportar', desc: 'El video listo para redes, edición o la web.' },
 ];
 
 const isAudio = (f: File) => f.type.startsWith('audio/') || /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i.test(f.name);
@@ -571,6 +572,14 @@ export function App() {
     setPlaying(true);
   };
 
+  const tabIndex = TABS.findIndex((t) => t.id === tab);
+  const current = TABS[tabIndex];
+  const next = TABS[tabIndex + 1] ?? null;
+  // Each tab starts scrolled to the top.
+  useEffect(() => {
+    document.querySelector('.panel')?.scrollTo(0, 0);
+  }, [tab]);
+
   const exportProgress = exportStatus.running && exportStatus.total > 0 ? Math.round((exportStatus.done / exportStatus.total) * 100) : null;
   const modes: [PreviewMode, string, string, boolean][] = [
     ['loop', 'Loop', 'Solo el loop, repetido: para chequear el empalme', true],
@@ -605,9 +614,11 @@ export function App() {
           </button>
         </header>
         <nav className="tabs" role="tablist" aria-label="Secciones">
-          {TABS.map((t) => (
+          {TABS.map((t, i) => (
+            <Fragment key={t.id}>
+            {i > 0 && TABS[i - 1].group !== t.group && <span className="tab-sep" aria-hidden />}
             <button
-              key={t.id}
+              title={t.desc}
               type="button"
               role="tab"
               aria-selected={tab === t.id}
@@ -620,9 +631,14 @@ export function App() {
               {t.id === 'music' && song && <em className="dot" aria-label="canción cargada" />}
               {t.id === 'lyrics' && songCtx && <em className="dot" aria-label="letra activa" />}
             </button>
+            </Fragment>
           ))}
         </nav>
-        <div className="panel" role="tabpanel">
+        <div className="panel" role="tabpanel" key={tab}>
+          <div className="panel-head">
+            <h2>{current.title}</h2>
+            <p>{current.desc}</p>
+          </div>
           {tab === 'image' && <ImagePanel cfg={cfg} update={update} cover={cover} label={label} onImage={onImage} />}
           {tab === 'scene' && <ScenePanel cfg={cfg} update={update} />}
           {tab === 'text' && (
@@ -693,6 +709,15 @@ export function App() {
                 }
               />
             </>
+          )}
+          {next && (
+            <button type="button" className="panel-next" onClick={() => setTab(next.id)}>
+              <span>
+                <small>Siguiente</small>
+                {next.title}
+              </span>
+              <Icon name={next.icon} size={16} />
+            </button>
           )}
         </div>
       </aside>

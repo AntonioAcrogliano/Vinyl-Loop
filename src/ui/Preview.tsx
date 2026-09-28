@@ -255,7 +255,9 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
           <canvas ref={ref} width={pw} height={ph} className={transparent ? 'checker' : ''} />
           {!hasPhoto && (
             <button type="button" className="empty-card" onClick={onPickPhoto}>
-              <Icon name="upload" size={20} />
+              <i className="empty-icon">
+                <Icon name="upload" size={20} />
+              </i>
               <span>
                 <b>Subí tu foto</b>
                 <small>Arrastrala a cualquier parte o hacé clic</small>
@@ -265,7 +267,7 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
         </div>
       </div>
       <div className="transport">
-        <button type="button" className="icon-btn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pausa' : 'Reproducir'} title="Espacio">
+        <button type="button" className="icon-btn play-btn" onClick={() => setPlaying((p) => !p)} aria-label={playing ? 'Pausa' : 'Reproducir'} title="Espacio">
           <Icon name={playing ? 'pause' : 'play'} />
         </button>
         {songActive && (

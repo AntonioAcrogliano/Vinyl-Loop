@@ -286,16 +286,51 @@ export function buildPaperCanvas(factory: CanvasFactory, size: number): AnyCanva
   return canvas;
 }
 
+/** Example jacket shown until a photo is loaded: a modernist sleeve in the app's colors. */
 function drawPlaceholderCover(ctx: Ctx2D, size: number): void {
-  const g = ctx.createLinearGradient(0, 0, size, size);
-  g.addColorStop(0, '#2f4858');
-  g.addColorStop(1, '#86bbd8');
+  const u = size;
+  const g = ctx.createLinearGradient(0, 0, u, u);
+  g.addColorStop(0, '#f26a43');
+  g.addColorStop(1, '#d8452b');
   ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.fillRect(0, 0, u, u);
+  const ink = '#1d1a17';
+  const cream = '#f3eadb';
+  // Big sun with grooves.
+  const cx = u * 0.6;
+  const cy = u * 0.4;
+  ctx.fillStyle = cream;
   ctx.beginPath();
-  ctx.arc(size * 0.5, size * 0.5, size * 0.18, 0, Math.PI * 2);
+  ctx.arc(cx, cy, u * 0.3, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = u * 0.006;
+  for (let r = 0.1; r < 0.29; r += 0.028) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = ink;
+  ctx.beginPath();
+  ctx.arc(cx, cy, u * 0.075, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#f26a43';
+  ctx.beginPath();
+  ctx.arc(cx, cy, u * 0.012, 0, Math.PI * 2);
+  ctx.fill();
+  // Stripes crossing the lower half.
+  ctx.fillStyle = ink;
+  for (let i = 0; i < 4; i++) ctx.fillRect(0, u * (0.64 + i * 0.03), u * (0.3 + i * 0.1), u * 0.012);
+  // Type.
+  ctx.fillStyle = ink;
+  ctx.textBaseline = 'alphabetic';
+  ctx.textAlign = 'left';
+  ctx.font = `900 ${(u * 0.1).toFixed(1)}px "Arial Black", "Helvetica Neue", Arial, sans-serif`;
+  ctx.fillText('VINILO', u * 0.07, u * 0.9);
+  ctx.font = `700 ${(u * 0.035).toFixed(1)}px "Helvetica Neue", Arial, sans-serif`;
+  ctx.fillText('LOOP · LADO A', u * 0.075, u * 0.945);
+  ctx.textAlign = 'right';
+  ctx.fillText('33⅓', u * 0.93, u * 0.945);
 }
 
 /**
