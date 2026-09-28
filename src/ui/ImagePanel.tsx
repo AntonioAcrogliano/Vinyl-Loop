@@ -8,6 +8,8 @@ import { ColorField, Section, Segmented } from './widgets';
 export interface LoadedImage {
   bitmap: ImageLike;
   name: string;
+  /** Original file, kept to save the project. */
+  blob: Blob;
 }
 
 interface Props {

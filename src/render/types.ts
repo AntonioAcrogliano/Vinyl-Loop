@@ -19,6 +19,36 @@ export type TextAnim = 'none' | 'fade' | 'slide' | 'wipe' | 'typewriter' | 'lett
 /** How the record makes room for the lyrics: slide aside, or open like a gatefold sleeve. */
 export type LyricsOpen = 'slide' | 'gatefold';
 
+/** Where the text goes (the record takes the other side), or no text at all. */
+export type ThumbLayout = 'left' | 'right' | 'bottom' | 'clean';
+/** scene: the video's background · blur: the cover photo, blurred and darkened. */
+export type ThumbBackground = 'scene' | 'blur';
+export type ThumbTextStyle = 'shadow' | 'outline' | 'band';
+
+export interface ThumbConfig {
+  layout: ThumbLayout;
+  background: ThumbBackground;
+  /** Empty = use the title card's text (Texto tab). */
+  title: string;
+  artist: string;
+  /** Small label above the title ("LETRA", "VINILO"…); empty = none. */
+  tag: string;
+  font: TextFont;
+  uppercase: boolean;
+  color: string;
+  /** Tag pill and "band" style color. */
+  accent: string;
+  style: ThumbTextStyle;
+  /** Text size multiplier. */
+  size: number;
+  /** Record size multiplier, 1 = as big as fits its side. */
+  recordSize: number;
+  /** Disc out of the sleeve (loop pose) or still inside. */
+  pose: 'out' | 'in';
+  /** Darkening behind the text, 0..1. */
+  scrim: number;
+}
+
 /** Square crop: center in normalized image coords, zoom ≥ 1 (1 = largest square that fits). */
 export interface Crop {
   cx: number;
@@ -128,6 +158,8 @@ export interface SceneConfig {
   };
   coverCrop: Crop;
   labelCrop: Crop;
+  /** YouTube thumbnail (Miniatura tab). */
+  thumb: ThumbConfig;
 }
 
 export interface Sprite {
@@ -150,6 +182,23 @@ export interface SceneAssets {
   sleeveShadow: Sprite;
   grainTiles: AnyCanvas[];
 }
+
+export const DEFAULT_THUMB: ThumbConfig = {
+  layout: 'left',
+  background: 'blur',
+  title: '',
+  artist: '',
+  tag: '',
+  font: 'condensed',
+  uppercase: true,
+  color: '#ffffff',
+  accent: '#ee5a3a',
+  style: 'shadow',
+  size: 1,
+  recordSize: 1,
+  pose: 'out',
+  scrim: 0.5,
+};
 
 export const DEFAULT_CROP: Crop = { cx: 0.5, cy: 0.5, zoom: 1 };
 
@@ -203,6 +252,7 @@ export const DEFAULT_CONFIG: SceneConfig = {
     animOut: 'fade',
   },
   labelCrop: DEFAULT_CROP,
+  thumb: DEFAULT_THUMB,
 };
 
 /** Fills in fields missing from older presets / partial configs. */
@@ -221,5 +271,6 @@ export function normalizeConfig(c: Partial<SceneConfig> & { useSeparateLabel?: b
     overlays: { ...d.overlays, ...c.overlays },
     vinyl: { ...d.vinyl, ...c.vinyl },
     sleeve: { ...d.sleeve, ...c.sleeve },
+    thumb: { ...d.thumb, ...c.thumb },
   };
 }

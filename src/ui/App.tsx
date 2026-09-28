@@ -16,14 +16,43 @@ import { LyricsTimeline } from './LyricsTimeline';
 import { MusicPanel } from './MusicPanel';
 import { PresetPanel } from './PresetPanel';
 import { Preview, type PreviewMode } from './Preview';
+import { ProjectsDialog } from './ProjectsDialog';
+import { getProject, newProjectId, projectFromFile, projectToFile, saveProject, type Project } from './projects';
 import { ScenePanel } from './ScenePanel';
 import { TextPanel } from './TextPanel';
+import { ThumbPanel } from './ThumbPanel';
+import { ThumbPreview } from './ThumbPreview';
+import { renderThumbnail } from '../render/thumbnail';
 
 async function loadImage(file: Blob, name: string): Promise<LoadedImage> {
   if (!/^image\/(jpeg|png|webp)$/.test(file.type)) throw new Error('Formato no soportado');
   const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  return { bitmap, name: name.replace(/\.[^.]+$/, '') };
+  return { bitmap, name: name.replace(/\.[^.]+$/, ''), blob: file };
 }
+
+/** Small JPEG of the thumbnail design, for the project list. */
+function projectPreview(cfg: SceneConfig, images: { cover: LoadedImage['bitmap'] | null; label: LoadedImage['bitmap'] | null }): Promise<Blob | null> {
+  const c = document.createElement('canvas');
+  c.width = 384;
+  c.height = 216;
+  try {
+    renderThumbnail(c.getContext('2d')!, cfg, cfg.thumb, images, canvasFactory);
+  } catch {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => c.toBlob(resolve, 'image/jpeg', 0.8));
+}
+
+/** Stable small ids for objects, to notice when a file or the lyrics change. */
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+const idOf = (o: object | null) => {
+  if (!o) return 0;
+  if (!objectIds.has(o)) objectIds.set(o, nextObjectId++);
+  return objectIds.get(o)!;
+};
+
+const DEFAULT_EXPORT: ExportSettings = { plan: { intro: true, loops: 1, outro: false }, format: 'mp4' };
 
 const IDLE: ExportStatus = { running: false, done: 0, total: 0, stage: '', message: '' };
 
@@ -41,7 +70,7 @@ async function runExport(job: ExportJob): Promise<ExportResult> {
   }
 }
 
-type Tab = 'image' | 'scene' | 'text' | 'music' | 'lyrics' | 'background' | 'export';
+type Tab = 'image' | 'scene' | 'text' | 'music' | 'lyrics' | 'background' | 'thumb' | 'export';
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'image', label: 'Imagen', icon: 'image' },
   { id: 'scene', label: 'Escena', icon: 'scene' },
@@ -49,6 +78,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'music', label: 'Música', icon: 'music' },
   { id: 'lyrics', label: 'Letra', icon: 'mic' },
   { id: 'background', label: 'Fondo', icon: 'background' },
+  { id: 'thumb', label: 'Miniatura', icon: 'thumb' },
   { id: 'export', label: 'Exportar', icon: 'export' },
 ];
 
@@ -96,15 +126,14 @@ export function App() {
   const [restartKey, setRestartKey] = useState(0);
   const [dragging, setDragging] = useState(false);
   const [toast, setToast] = useState('');
-  const [exportSettings, setExportSettings] = useState<ExportSettings>({
-    plan: { intro: true, loops: 1, outro: false },
-    format: 'mp4',
-  });
+  const [exportSettings, setExportSettings] = useState<ExportSettings>(DEFAULT_EXPORT);
   const [exportStatus, setExportStatus] = useState<ExportStatus>(IDLE);
   const [mp4Available, setMp4Available] = useState<boolean | null>(null);
   const [webmNative, setWebmNative] = useState<boolean | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [project, setProject] = useState<{ id: string; name: string; created: number } | null>(null);
+  const [projectsOpen, setProjectsOpen] = useState(false);
 
   const update = useCallback((patch: Partial<SceneConfig>) => setCfg((c) => ({ ...c, ...patch })), []);
   const timing = timingFor(cfg);
@@ -350,6 +379,161 @@ export function App() {
     };
   }, [onImage, onSongFile]);
 
+  // ---------- Projects ----------
+  const stateKey = useMemo(
+    () =>
+      JSON.stringify([cfg, exportSettings, includeAudio, autoFit, typedDuration]) +
+      `|${idOf(cover)}|${idOf(label)}|${idOf(song)}|${idOf(lyrics)}`,
+    [cfg, exportSettings, includeAudio, autoFit, typedDuration, cover, label, song, lyrics],
+  );
+  const [savedKey, setSavedKey] = useState(stateKey);
+  // Set after saving / loading; the next render (with all the new state) becomes the saved one.
+  const markSaved = useRef(false);
+  useEffect(() => {
+    if (!markSaved.current) return;
+    markSaved.current = false;
+    setSavedKey(stateKey);
+  });
+  const dirty = stateKey !== savedKey;
+
+  useEffect(() => {
+    if (!project || !dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [project, dirty]);
+
+  const suggestedName = (cfg.text.title !== DEFAULT_CONFIG.text.title && cfg.text.title.trim()) || song?.title || song?.name || cover?.name || 'Mi vinilo';
+
+  const saveCurrent = async (name: string, asCopy: boolean) => {
+    const id = !asCopy && project ? project.id : newProjectId();
+    const now = Date.now();
+    const created = !asCopy && project ? project.created : now;
+    const p: Project = {
+      id,
+      name,
+      created,
+      updated: now,
+      preview: await projectPreview(cfg, images),
+      cfg,
+      cover: cover ? { blob: cover.blob, name: cover.name } : null,
+      label: label ? { blob: label.blob, name: label.name } : null,
+      song: song ? { blob: song.file, name: song.file.name } : null,
+      lyrics,
+      plan: exportSettings.plan,
+      format: exportSettings.format,
+      includeAudio,
+      autoFit,
+      typedDuration,
+    };
+    await saveProject(p);
+    setProject({ id, name, created });
+    markSaved.current = true;
+    setSavedKey('');
+  };
+
+  const openProject = async (p: Project) => {
+    const [cov, lab, s] = await Promise.all([
+      p.cover ? loadImage(p.cover.blob, p.cover.name).catch(() => null) : null,
+      p.label ? loadImage(p.label.blob, p.label.name).catch(() => null) : null,
+      p.song
+        ? import('../audio/song')
+            .then(({ loadSong }) => loadSong(p.song!.blob instanceof File ? p.song!.blob : new File([p.song!.blob], p.song!.name, { type: p.song!.blob.type })))
+            .catch(() => null)
+        : null,
+    ]);
+    setSong((old) => {
+      if (old) URL.revokeObjectURL(old.url);
+      return s;
+    });
+    setCover(cov);
+    setLabel(lab);
+    setCfg(p.cfg);
+    setLyricsRaw(p.lyrics);
+    history.current = [];
+    setCanUndo(false);
+    setExportSettings({ plan: p.plan, format: p.format });
+    setIncludeAudio(p.includeAudio);
+    setAutoFit(p.autoFit);
+    setTypedDuration(p.typedDuration);
+    setMode(s || p.typedDuration ? 'song' : 'introLoop');
+    setPlaying(false);
+    setRestartKey((k) => k + 1);
+    setProject({ id: p.id, name: p.name, created: p.created });
+    markSaved.current = true;
+    setSavedKey('');
+    const missing = [p.cover && !cov && 'la foto', p.song && !s && 'la canción'].filter(Boolean);
+    setToast(`Abierto “${p.name}”${missing.length ? `, pero no pude leer ${missing.join(' ni ')}` : ''}.`);
+  };
+
+  const newProject = () => {
+    setSong((old) => {
+      if (old) URL.revokeObjectURL(old.url);
+      return null;
+    });
+    setCover(null);
+    setLabel(null);
+    setCfg(DEFAULT_CONFIG);
+    setLyricsRaw(null);
+    history.current = [];
+    setCanUndo(false);
+    setExportSettings(DEFAULT_EXPORT);
+    setIncludeAudio(true);
+    setAutoFit(true);
+    setTypedDuration(null);
+    setMode('introLoop');
+    setPlaying(true);
+    setRestartKey((k) => k + 1);
+    setProject(null);
+    setTab('image');
+    markSaved.current = true;
+    setSavedKey('');
+  };
+
+  const exportProjectFile = async () => {
+    if (!project) return;
+    if (dirty) await saveCurrent(project.name, false);
+    const p = await getProject(project.id);
+    if (!p) throw new Error('No encontré el proyecto guardado.');
+    downloadBlob(await projectToFile(p), `${p.name.replace(/[^\w-]+/g, '_') || 'proyecto'}.vinilo`);
+  };
+
+  const importProjectFile = async (file: File) => {
+    const p = await projectFromFile(file);
+    await saveProject(p);
+    await openProject(p);
+  };
+
+  // Ctrl+S saves the open project (or asks for a name the first time).
+  const saveRef = useRef<() => void>(() => {});
+  saveRef.current = () => {
+    if (!project) {
+      setProjectsOpen(true);
+      return;
+    }
+    saveCurrent(project.name, false)
+      .then(() => setToast(`Guardado “${project.name}”.`))
+      .catch((err) => setToast(`No se pudo guardar: ${(err as Error).message}`));
+  };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        saveRef.current();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // The thumbnail tab shows a still: stop the song.
+  useEffect(() => {
+    if (tab === 'thumb') {
+      audio?.pause();
+      setPlaying(false);
+    }
+  }, [tab, audio]);
+
   // ---------- Export ----------
   const onExport = async () => {
     const ac = new AbortController();
@@ -402,10 +586,23 @@ export function App() {
           <div className="logo" aria-hidden>
             <span />
           </div>
-          <div>
+          <div className="brand-text">
             <h1>Vinilo Loop</h1>
-            <p>Todo corre en tu navegador</p>
+            <p title={project ? project.name : undefined}>
+              {project ? (
+                <>
+                  {project.name}
+                  <span className={dirty ? 'save-state dirty' : 'save-state'}>{dirty ? ' · sin guardar' : ' · guardado'}</span>
+                </>
+              ) : (
+                'Todo corre en tu navegador'
+              )}
+            </p>
           </div>
+          <button type="button" className="secondary projects-btn" onClick={() => setProjectsOpen(true)} title="Guardar y abrir proyectos (Ctrl+S guarda)">
+            <Icon name="folder" size={16} />
+            <span>Proyectos</span>
+          </button>
         </header>
         <nav className="tabs" role="tablist" aria-label="Secciones">
           {TABS.map((t) => (
@@ -468,6 +665,7 @@ export function App() {
             />
           )}
           {tab === 'background' && <BackgroundPanel cfg={cfg} update={update} photoPalette={photoPalette} />}
+          {tab === 'thumb' && <ThumbPanel cfg={cfg} update={update} images={images} name={song?.name ?? cover?.name ?? 'vinilo'} />}
           {tab === 'export' && (
             <>
               <ExportPanel
@@ -501,6 +699,10 @@ export function App() {
 
       <main className="main">
         <div className="toolbar">
+          {tab === 'thumb' ? (
+            <b className="toolbar-title">Miniatura para YouTube</b>
+          ) : (
+          <>
           <div className="segmented" role="radiogroup" aria-label="Qué reproducir">
             {modes.map(([m, name, title, enabled]) => (
               <button
@@ -520,15 +722,18 @@ export function App() {
           <button type="button" className="icon-btn restart" onClick={() => setRestartKey((k) => k + 1)} title="Volver al inicio (Inicio)" aria-label="Volver al inicio">
             <Icon name="restart" />
           </button>
+          </>
+          )}
           <div className="spacer" />
-          <span className="badge-info">
-            {cfg.width}×{cfg.height} · {cfg.fps} fps
-          </span>
+          <span className="badge-info">{tab === 'thumb' ? '1280×720 · JPG' : `${cfg.width}×${cfg.height} · ${cfg.fps} fps`}</span>
           <button type="button" className="primary" onClick={() => setTab('export')}>
             <Icon name="export" size={16} />
             <span className="btn-text">{exportProgress !== null ? `Exportando ${exportProgress}%` : 'Exportar'}</span>
           </button>
         </div>
+        {tab === 'thumb' ? (
+          <ThumbPreview cfg={cfg} images={images} />
+        ) : (
         <Preview
           cfg={cfg}
           images={images}
@@ -543,6 +748,7 @@ export function App() {
           songCtx={songCtx}
           seekRequest={seekRequest}
         />
+        )}
         {tab === 'lyrics' && song && lyrics && lyrics.lines.some((l) => Number.isFinite(l.start)) && (
           <LyricsTimeline
             song={song}
@@ -576,6 +782,26 @@ export function App() {
             <b>Soltá una imagen (portada) o una canción</b>
           </div>
         </div>
+      )}
+      {projectsOpen && (
+        <ProjectsDialog
+          current={project}
+          dirty={dirty}
+          suggestedName={suggestedName}
+          onSave={saveCurrent}
+          onOpen={async (id) => {
+            const p = await getProject(id);
+            if (!p) throw new Error('No encontré ese proyecto.');
+            await openProject(p);
+          }}
+          onNew={newProject}
+          onImport={importProjectFile}
+          onExportFile={exportProjectFile}
+          onDeleted={(id) => {
+            if (project?.id === id) setProject(null);
+          }}
+          onClose={() => setProjectsOpen(false)}
+        />
       )}
       {toast && (
         <div className="toast" role="status">

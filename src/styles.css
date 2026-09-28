@@ -110,7 +110,7 @@ button {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   gap: 2px;
   padding: 0 10px;
   border-bottom: 1px solid var(--line);
@@ -1225,4 +1225,165 @@ kbd {
 button.secondary.small-btn {
   padding: 4px 9px;
   font-size: 12px;
+}
+
+/* ---------- Projects ---------- */
+.brand-text {
+  min-width: 0;
+  flex: 1;
+}
+.brand-text p {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.save-state {
+  color: var(--faint);
+}
+.save-state.dirty {
+  color: var(--warn);
+}
+button.secondary.projects-btn {
+  flex: none;
+  padding: 6px 10px;
+}
+label.button.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+dialog.projects {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  padding: 18px 20px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+  overflow: auto;
+}
+dialog.projects::backdrop {
+  background: rgba(8, 8, 10, 0.7);
+}
+dialog.projects[open] {
+  display: grid;
+  gap: 12px;
+}
+dialog.projects header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+dialog.projects h2 {
+  margin: 0;
+  font-size: 17px;
+}
+dialog.projects .save-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+dialog.projects .hint {
+  margin: 0;
+}
+.project-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.project {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--panel-2);
+  min-width: 0;
+}
+.project.on {
+  border-color: var(--accent);
+}
+.project-list > .hint {
+  grid-column: 1 / -1;
+}
+.project-open {
+  display: block;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+  background: var(--panel-3);
+}
+.project-open img,
+.project-open .noimg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.project-open:hover img {
+  filter: brightness(1.1);
+}
+.project-info {
+  display: grid;
+  gap: 2px;
+  padding: 0 2px 2px;
+  min-width: 0;
+}
+.project-info b {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-info small {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.project-info input {
+  width: 100%;
+}
+.project-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
+button.link.danger {
+  color: var(--warn);
+}
+
+/* ---------- Thumbnail ---------- */
+.toolbar-title {
+  font-size: 14px;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.chip:hover {
+  color: var(--text);
+}
+.chip.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.thumb-footer {
+  display: grid;
+  gap: 8px;
+}
+.thumb-footer .hint {
+  margin: 0;
 }
