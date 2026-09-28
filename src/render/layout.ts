@@ -1,3 +1,4 @@
+import { slideRegion } from './lyrics';
 import { textReserve } from './text';
 import { clamp01, easeInOutCubic, easeOutCubic } from './timing';
 import type { SceneConfig } from './types';
@@ -30,15 +31,31 @@ export function directionVector(cfg: SceneConfig): [number, number] {
  * Where everything is for a given pose `move` (0 = disc inside the sleeve, 1 = loop pose).
  * `move` is linear in time; each layout applies its own easing, so the outro (move going
  * 1 → 0) is the intro played backwards, starting at rest.
+ *
+ * `aside` (0..1, already eased) slides and shrinks the whole group into the record half of
+ * the frame to make room for the lyrics; 0 leaves the layout untouched.
  */
-export function placement(cfg: SceneConfig, W: number, H: number, move: number): Placement {
+export function placement(cfg: SceneConfig, W: number, H: number, move: number, aside = 0): Placement {
   const base = Math.min(W, H);
-  const S = cfg.sleeveSize * base;
-  const D = DISC_TO_SLEEVE * S;
+  let S = cfg.sleeveSize * base;
+  let D = DISC_TO_SLEEVE * S;
   const [dx, dy] = directionVector(cfg);
-  const cx = W / 2 + cfg.offsetX * W;
+  let cx = W / 2 + cfg.offsetX * W;
   // Leave room for the title card: the group moves half the text height away from it.
-  const cy = H / 2 + cfg.offsetY * H - textReserve(cfg, W, H) / 2;
+  let cy = H / 2 + cfg.offsetY * H - textReserve(cfg, W, H) / 2;
+  if (aside > 0) {
+    // Bounding box of the group at full size, then fit it into the record region.
+    const out = cfg.layout === 'solo' ? 0 : cfg.discOut * D;
+    const gw = cfg.layout === 'solo' ? D : dx !== 0 ? S + out : S;
+    const gh = cfg.layout === 'solo' ? D : dy !== 0 ? S + out : S;
+    const r = slideRegion(W, H).record;
+    const k = Math.min(1, (0.86 * r.w) / gw, (0.82 * r.h) / gh);
+    const scale = 1 + (k - 1) * aside;
+    S *= scale;
+    D *= scale;
+    cx += (r.x + r.w / 2 - cx) * aside;
+    cy += (r.y + r.h / 2 - cy) * aside;
+  }
   const u = clamp01(move);
 
   if (cfg.layout === 'solo') {

@@ -1,4 +1,4 @@
-import { buildAssets, framesFor, planTag, renderFrame, timingFor, type ExportPlan, type SceneImages } from '../render/scene';
+import { buildAssets, framesFor, planTag, renderFrame, timingFor, type ExportPlan, type SceneImages, type SongContext } from '../render/scene';
 import type { AnyCanvas, CanvasFactory, Ctx2D, SceneConfig } from '../render/types';
 
 export type ExportFormat = 'mp4' | 'webm' | 'png' | 'prores';
@@ -12,6 +12,8 @@ export interface ExportJob {
   name: string;
   /** Song to put in the video (starts with the intro). */
   audio?: File;
+  /** Karaoke lyrics for the full-song video. */
+  song?: SongContext | null;
   /** `stage` describes the current step when an export has more than one (render, encode…). */
   onProgress?: (done: number, total: number, stage?: string) => void;
   signal?: AbortSignal;
@@ -63,7 +65,7 @@ export async function renderSequence(
   const ctx = canvas.getContext('2d', { alpha: true }) as Ctx2D;
   for (let k = 0; k < frames.length; k++) {
     if (job.signal?.aborted) throw new ExportCancelled();
-    renderFrame(ctx, frames[k], cfg, assets);
+    renderFrame(ctx, frames[k], cfg, assets, job.song);
     await sink(canvas, k, frames.length);
     job.onProgress?.(k + 1, frames.length, 'Renderizando');
     // Let the UI breathe (progress bar, cancel button).

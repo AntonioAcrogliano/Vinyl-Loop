@@ -216,14 +216,14 @@ describe('export plans', () => {
   it('never include the duplicated frame F', () => {
     const loop = framesFor(t, { intro: false, loops: 1, outro: false });
     expect(loop.length).toBe(t.F);
-    expect(loop[loop.length - 1]).toEqual({ seg: 'loop', i: t.F - 1 });
+    expect(loop[loop.length - 1]).toEqual({ seg: 'loop', i: t.F - 1, rep: 0 });
   });
 
   it('concatenate intro, N loops and outro', () => {
     const all = framesFor(t, { intro: true, loops: 3, outro: true });
     expect(all.length).toBe(t.I + 3 * t.F + t.O);
     expect(all[0]).toEqual({ seg: 'intro', i: 0 });
-    expect(all[t.I]).toEqual({ seg: 'loop', i: 0 });
+    expect(all[t.I]).toEqual({ seg: 'loop', i: 0, rep: 0 });
     expect(all[all.length - 1]).toEqual({ seg: 'outro', i: t.O - 1 });
     expect(planTag({ intro: true, loops: 3, outro: true })).toBe('intro-loopx3-outro');
     expect(planTag({ intro: true, loops: 1, outro: false })).toBe('intro-loop');

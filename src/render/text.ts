@@ -71,11 +71,11 @@ function lineProgress(e: number, delay: number): number {
   return clamp01((e - delay) / (1 - delay));
 }
 
-export function drawTitleCard(ctx: Ctx2D, W: number, H: number, cfg: SceneConfig, st: FrameState, t: Timing): void {
+export function drawTitleCard(ctx: Ctx2D, W: number, H: number, cfg: SceneConfig, st: FrameState, t: Timing, fade = 1): void {
   const tx = cfg.text;
   if (!tx.enabled || (!tx.title.trim() && !tx.artist.trim())) return;
   const { e, anim, out } = textPhase(cfg, st, t);
-  if (e <= 0) return;
+  if (e <= 0 || fade <= 0) return;
 
   const base = Math.min(W, H);
   const f = FONTS[tx.font] ?? FONTS.sans;
@@ -104,6 +104,7 @@ export function drawTitleCard(ctx: Ctx2D, W: number, H: number, cfg: SceneConfig
   ctx.textAlign = left ? 'left' : 'center';
   ctx.textBaseline = 'alphabetic';
   ctx.fillStyle = tx.color;
+  ctx.globalAlpha = fade;
   if (tx.shadow) {
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = titleSize * 0.35;
@@ -130,10 +131,10 @@ export function drawTitleCard(ctx: Ctx2D, W: number, H: number, cfg: SceneConfig
     if (anim === 'none' || e >= 1) {
       ctx.fillText(line.text, x, line.y);
     } else if (anim === 'fade') {
-      ctx.globalAlpha = p;
+      ctx.globalAlpha = (p) * fade;
       ctx.fillText(line.text, x, line.y);
     } else if (anim === 'slide') {
-      ctx.globalAlpha = p;
+      ctx.globalAlpha = (p) * fade;
       ctx.fillText(line.text, x, line.y + (1 - p) * line.size * (out ? 0.9 : 1.1) * (top ? -1 : 1));
     } else if (anim === 'wipe') {
       const x0 = left ? x : x - width / 2;
@@ -167,13 +168,13 @@ export function drawTitleCard(ctx: Ctx2D, W: number, H: number, cfg: SceneConfig
         const cx = x0 + ctx.measureText(prefix).width;
         prefix += c;
         if (lp <= 0) return;
-        ctx.globalAlpha = lp;
+        ctx.globalAlpha = (lp) * fade;
         ctx.fillText(c, cx, line.y + (1 - lp) * line.size * 0.5);
       });
       ctx.textAlign = left ? 'left' : 'center';
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = fade;
     }
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = fade;
     charsBefore += chars.length;
   }
   ctx.restore();

@@ -16,6 +16,8 @@ export type TextPosition = 'bottom' | 'bottomLeft' | 'top' | 'topLeft';
 export type TextFont = 'sans' | 'serif' | 'condensed' | 'mono';
 /** How the title card enters during the intro / leaves during the outro. */
 export type TextAnim = 'none' | 'fade' | 'slide' | 'wipe' | 'typewriter' | 'letters';
+/** How the record makes room for the lyrics: slide aside, or open like a gatefold sleeve. */
+export type LyricsOpen = 'slide' | 'gatefold';
 
 /** Square crop: center in normalized image coords, zoom ≥ 1 (1 = largest square that fits). */
 export interface Crop {
@@ -108,6 +110,22 @@ export interface SceneConfig {
     animIn: TextAnim;
     animOut: TextAnim;
   };
+  /** Karaoke lyrics (only in the full-song video, where there is a song timeline). */
+  lyrics: {
+    enabled: boolean;
+    open: LyricsOpen;
+    font: TextFont;
+    /** Size multiplier, 1 = default. */
+    size: number;
+    color: string;
+    /** Karaoke fill color of the line being sung. */
+    highlight: string;
+    align: 'left' | 'center';
+    /** Seconds added to every lyric time (fix a global sync offset). */
+    offset: number;
+    /** Instrumental gaps longer than this bring the record back to the center (s). */
+    gap: number;
+  };
   coverCrop: Crop;
   labelCrop: Crop;
 }
@@ -159,6 +177,17 @@ export const DEFAULT_CONFIG: SceneConfig = {
   shadow: 0.6,
   coverCrop: DEFAULT_CROP,
   label: { source: 'cover', preset: 'classic', color: '', title: 'Vinilo Loop', subtitle: 'Lado A' },
+  lyrics: {
+    enabled: false,
+    open: 'slide',
+    font: 'sans',
+    size: 1,
+    color: '#1c1c1e',
+    highlight: '#ee5a3a',
+    align: 'left',
+    offset: 0,
+    gap: 8,
+  },
   text: {
     enabled: false,
     title: 'Nombre del tema',
@@ -187,6 +216,7 @@ export function normalizeConfig(c: Partial<SceneConfig> & { useSeparateLabel?: b
     ...rest,
     label,
     text: { ...d.text, ...c.text },
+    lyrics: { ...d.lyrics, ...c.lyrics },
     background: { ...d.background, ...c.background },
     overlays: { ...d.overlays, ...c.overlays },
     vinyl: { ...d.vinyl, ...c.vinyl },

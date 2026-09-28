@@ -43,6 +43,8 @@ export type Segment = 'intro' | 'loop' | 'outro';
 export interface FrameRef {
   seg: Segment;
   i: number;
+  /** Which loop repetition (0-based) in a full-song sequence. Doesn't affect the image of the loop itself. */
+  rep?: number;
 }
 
 export function loopTurns(rpm: number, targetLoopSeconds: number): number {

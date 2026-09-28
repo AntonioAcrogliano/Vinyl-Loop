@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { canvasFactory } from '../export/common';
 import { getBackground } from '../render/backgrounds';
-import { buildAssets, framesFor, renderFrame, timingFor, type ExportPlan, type SceneImages } from '../render/scene';
+import { buildAssets, framesFor, renderFrame, timingFor, type ExportPlan, type SceneImages, type SongContext } from '../render/scene';
 import type { FrameRef, Segment, Timing } from '../render/timing';
 import type { SceneConfig } from '../render/types';
 import { Icon } from './icons';
@@ -19,9 +19,13 @@ interface Props {
   hasPhoto: boolean;
   onPickPhoto: () => void;
   /** Song playback for the "song" mode: the audio is the master clock. */
-  songUrl: string | null;
+  audio: HTMLAudioElement | null;
   /** Plan played in "song" mode (intro + N loops + outro). */
   songPlan: ExportPlan | null;
+  /** Karaoke lyrics, drawn in the "song" mode. */
+  songCtx: SongContext | null;
+  /** Jump to this song time (seconds) when `id` changes. */
+  seekRequest: { time: number; id: number } | null;
 }
 
 /** Longest side of the preview bitmap; the render is resolution-independent. */
@@ -70,7 +74,7 @@ function describe(ref: FrameRef, t: Timing): string {
   return `${SEG_NAME[ref.seg]} · frame ${ref.i + 1}/${total}`;
 }
 
-export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, hasPhoto, onPickPhoto, songUrl, songPlan }: Props) {
+export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, hasPhoto, onPickPhoto, audio, songPlan, songCtx, seekRequest }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const statusRef = useRef<HTMLSpanElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
@@ -82,20 +86,11 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
   const timing = timingFor(cfg);
   const seq = useMemo(() => sequenceFor(timing, mode, cfg.fps, songPlan), [timing, mode, cfg.fps, songPlan]);
 
-  // Audio element for the song mode; its currentTime drives the frame.
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // The song's audio element (owned by the app); its currentTime drives the frame in song mode.
+  const audioRef = useRef<HTMLAudioElement | null>(audio);
+  audioRef.current = audio;
   const [muted, setMuted] = useState(false);
-  useEffect(() => {
-    if (!songUrl) return;
-    const a = new Audio(songUrl);
-    a.preload = 'auto';
-    audioRef.current = a;
-    return () => {
-      a.pause();
-      audioRef.current = null;
-    };
-  }, [songUrl]);
-  const songActive = mode === 'song' && !!songUrl;
+  const songActive = mode === 'song' && !!audio;
   // Song time of frame 0: an export without the intro starts the audio at the loop.
   const audioOffset = songPlan && !songPlan.intro ? timing.I / cfg.fps : 0;
 
@@ -125,8 +120,9 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
 
   // Playback clock: position in frames = anchorPos (+ elapsed time while playing).
   const clock = useRef({ anchorTime: performance.now(), anchorPos: 0 });
-  const live = useRef({ cfg, seq, playing, assets, songActive, audioOffset });
-  live.current = { cfg, seq, playing, assets, songActive, audioOffset };
+  const karaoke = mode === 'song' ? songCtx : null;
+  const live = useRef({ cfg, seq, playing, assets, songActive, audioOffset, karaoke });
+  live.current = { cfg, seq, playing, assets, songActive, audioOffset, karaoke };
   const posNow = useCallback(() => {
     const L = live.current;
     const a = audioRef.current;
@@ -159,6 +155,13 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
 
   useEffect(() => seek(0), [restartKey, mode, seek]);
 
+  // Jump requests (e.g. "listen from this lyric line"), after the mode change above.
+  useEffect(() => {
+    if (!seekRequest) return;
+    seek(Math.max(0, (seekRequest.time - live.current.audioOffset) * live.current.cfg.fps));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seekRequest?.id, seek]);
+
   // Play / pause the song with the transport; restart it at the end, like the other modes.
   useEffect(() => {
     const a = audioRef.current;
@@ -174,7 +177,7 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
       return () => a.removeEventListener('ended', onEnd);
     }
     a.pause();
-  }, [songActive, playing, muted, audioOffset, setPlaying, songUrl]);
+  }, [songActive, playing, muted, audioOffset, setPlaying, audio]);
 
   // One render loop for the component's lifetime; it only draws when the frame changes.
   useEffect(() => {
@@ -182,13 +185,13 @@ export function Preview({ cfg, images, mode, playing, setPlaying, restartKey, ha
     if (!canvas) return;
     const ctx = canvas.getContext('2d')!;
     let raf = 0;
-    let last: { index: number; cfg: SceneConfig | null; assets: unknown; seq: unknown } = { index: -1, cfg: null, assets: null, seq: null };
+    let last: { index: number; cfg: SceneConfig | null; assets: unknown; seq: unknown; k: unknown } = { index: -1, cfg: null, assets: null, seq: null, k: null };
     const tick = () => {
-      const { cfg: c, seq: s, assets: a } = live.current;
+      const { cfg: c, seq: s, assets: a, karaoke: k } = live.current;
       const index = indexNow();
-      if (index !== last.index || c !== last.cfg || a !== last.assets || s !== last.seq) {
-        renderFrame(ctx, s.frames[index], c, a);
-        last = { index, cfg: c, assets: a, seq: s };
+      if (index !== last.index || c !== last.cfg || a !== last.assets || s !== last.seq || k !== last.k) {
+        renderFrame(ctx, s.frames[index], c, a, k);
+        last = { index, cfg: c, assets: a, seq: s, k };
         const t = timingFor(c);
         if (statusRef.current) statusRef.current.textContent = describe(s.frames[index], t);
         if (timeRef.current) {

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Song } from '../audio/song';
 import { ExportCancelled, canvasFactory, downloadBlob, type ExportJob, type ExportResult } from '../export/common';
 import { getBackground } from '../render/backgrounds';
-import { framesFor, timingFor } from '../render/scene';
+import { cleanLines, type Lyrics } from '../lyrics/lyrics';
+import { framesFor, timingFor, type SongContext } from '../render/scene';
 import { DEFAULT_CONFIG, DEFAULT_CROP, type SceneConfig } from '../render/types';
 import { fitToDuration, formatDuration, type SongFit } from '../utils/fit';
 import { extractPalette } from '../utils/palette';
@@ -10,6 +11,7 @@ import { BackgroundPanel } from './BackgroundPanel';
 import { ExportPanel, type ExportSettings, type ExportStatus } from './ExportPanel';
 import { Icon, type IconName } from './icons';
 import { ImagePanel, type LoadedImage } from './ImagePanel';
+import { LyricsPanel } from './LyricsPanel';
 import { MusicPanel } from './MusicPanel';
 import { PresetPanel } from './PresetPanel';
 import { Preview, type PreviewMode } from './Preview';
@@ -38,12 +40,13 @@ async function runExport(job: ExportJob): Promise<ExportResult> {
   }
 }
 
-type Tab = 'image' | 'scene' | 'text' | 'music' | 'background' | 'export';
+type Tab = 'image' | 'scene' | 'text' | 'music' | 'lyrics' | 'background' | 'export';
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: 'image', label: 'Imagen', icon: 'image' },
   { id: 'scene', label: 'Escena', icon: 'scene' },
   { id: 'text', label: 'Texto', icon: 'text' },
   { id: 'music', label: 'Música', icon: 'music' },
+  { id: 'lyrics', label: 'Letra', icon: 'mic' },
   { id: 'background', label: 'Fondo', icon: 'background' },
   { id: 'export', label: 'Exportar', icon: 'export' },
 ];
@@ -59,6 +62,10 @@ export function App() {
   const [autoFit, setAutoFit] = useState(true);
   const [typedDuration, setTypedDuration] = useState<number | null>(null);
   const [includeAudio, setIncludeAudio] = useState(true);
+  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
+  const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null);
+  // One audio element per song, shared by the preview (song mode) and the lyrics editor.
+  const [audio, setAudio] = useState<HTMLAudioElement | null>(null);
   const [tab, setTab] = useState<Tab>('image');
   const [mode, setMode] = useState<PreviewMode>('introLoop');
   const [playing, setPlaying] = useState(true);
@@ -167,6 +174,30 @@ export function App() {
     [target, effective.plan.intro, effective.plan.loops, effective.plan.outro],
   );
 
+  useEffect(() => {
+    if (!song) {
+      setAudio(null);
+      return;
+    }
+    const a = new Audio(song.url);
+    a.preload = 'auto';
+    setAudio(a);
+    return () => a.pause();
+  }, [song]);
+
+  // Karaoke context: the lyrics with the plan the song video uses.
+  const songCtx = useMemo<SongContext | null>(() => {
+    if (!songPlan || !lyrics || !cfg.lyrics.enabled) return null;
+    const lines = cleanLines(lyrics.lines);
+    return lines.length ? { lines, plan: songPlan } : null;
+  }, [songPlan, lyrics, cfg.lyrics.enabled]);
+
+  const playAt = (time: number) => {
+    setMode('song');
+    setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }));
+    setPlaying(true);
+  };
+
   // ---------- Files ----------
   const onImage = useCallback(async (kind: 'cover' | 'label', file: File) => {
     try {
@@ -237,6 +268,7 @@ export function App() {
   const removeSong = () => {
     if (song) URL.revokeObjectURL(song.url);
     setSong(null);
+    setLyrics(null);
     if (mode === 'song' && typedDuration === null) setMode('introLoop');
   };
 
@@ -290,6 +322,7 @@ export function App() {
       format: effective.format,
       name: song?.name ?? cover?.name ?? 'vinilo',
       audio: song && includeAudio ? song.file : undefined,
+      song: songCtx ? { lines: songCtx.lines, plan: effective.plan } : null,
       signal: ac.signal,
       onProgress: (done, total, stage = '') => setExportStatus({ running: true, done, total, stage, message: '' }),
     };
@@ -349,6 +382,7 @@ export function App() {
               <span>{t.label}</span>
               {t.id === 'export' && exportProgress !== null && <em className="badge">{exportProgress}%</em>}
               {t.id === 'music' && song && <em className="dot" aria-label="canción cargada" />}
+              {t.id === 'lyrics' && songCtx && <em className="dot" aria-label="letra activa" />}
             </button>
           ))}
         </nav>
@@ -379,6 +413,18 @@ export function App() {
               setAutoFit={setAutoFit}
               onFitDuration={onFitDuration}
               onRefit={() => fit && applyFit(fit)}
+            />
+          )}
+          {tab === 'lyrics' && (
+            <LyricsPanel
+              cfg={cfg}
+              update={update}
+              song={song}
+              audio={audio}
+              lyrics={lyrics}
+              setLyrics={setLyrics}
+              onPlayAt={playAt}
+              onGoToMusic={() => setTab('music')}
             />
           )}
           {tab === 'background' && <BackgroundPanel cfg={cfg} update={update} photoPalette={photoPalette} />}
@@ -452,8 +498,10 @@ export function App() {
           restartKey={restartKey}
           hasPhoto={!!cover}
           onPickPhoto={() => fileRef.current?.click()}
-          songUrl={song?.url ?? null}
+          audio={audio}
           songPlan={songPlan}
+          songCtx={songCtx}
+          seekRequest={seekRequest}
         />
       </main>
 

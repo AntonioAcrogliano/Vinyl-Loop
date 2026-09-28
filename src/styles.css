@@ -110,7 +110,7 @@ button {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 2px;
   padding: 0 10px;
   border-bottom: 1px solid var(--line);
@@ -124,7 +124,7 @@ button {
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
   cursor: pointer;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
@@ -1074,4 +1074,96 @@ kbd {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+/* Lyrics editor */
+.results {
+  display: grid;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.result {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.result:hover {
+  border-color: var(--accent);
+}
+.result small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.paste {
+  display: grid;
+  gap: 8px;
+}
+.paste textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+}
+.lines {
+  display: grid;
+  gap: 2px;
+  max-height: 420px;
+  overflow-y: auto;
+  margin-right: -6px;
+  padding-right: 6px;
+}
+.line {
+  display: grid;
+  grid-template-columns: 24px 66px 1fr 22px 22px 22px;
+  gap: 4px;
+  align-items: center;
+  padding: 2px;
+  border-radius: 6px;
+}
+.line.on {
+  background: var(--accent-soft);
+}
+.line.next {
+  outline: 1px dashed var(--accent);
+}
+.line input {
+  min-height: 28px;
+  padding: 4px 6px;
+  font-size: 12.5px;
+}
+.line input.time {
+  font-variant-numeric: tabular-nums;
+}
+.mini {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.mini:hover {
+  background: var(--panel-3);
+  color: var(--text);
+}
+.tap .primary.big {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
