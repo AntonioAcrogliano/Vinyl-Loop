@@ -19,6 +19,8 @@ import { Preview, type PreviewMode } from './Preview';
 import { ProjectsDialog } from './ProjectsDialog';
 import { getProject, newProjectId, projectFromFile, projectToFile, saveProject, type Project } from './projects';
 import { ScenePanel } from './ScenePanel';
+import { StartScreen, type ProjectKind } from './StartScreen';
+import { Tour, type TourStep } from './Tour';
 import { TextPanel } from './TextPanel';
 import { ThumbPanel } from './ThumbPanel';
 import { ThumbPreview } from './ThumbPreview';
@@ -83,6 +85,22 @@ const TABS: { id: Tab; label: string; icon: IconName; group: number; title: stri
   { id: 'export', label: 'Exportar', icon: 'export', group: 2, title: 'Exportar', desc: 'El video listo para redes, edición o la web.' },
 ];
 
+const TOUR_SEEN = 'vinilo-loop:tour-v1';
+const tourSeen = () => {
+  try {
+    return localStorage.getItem(TOUR_SEEN) === '1';
+  } catch {
+    return true;
+  }
+};
+const markTourSeen = () => {
+  try {
+    localStorage.setItem(TOUR_SEEN, '1');
+  } catch {
+    // Private mode: the tour just shows again next time.
+  }
+};
+
 const isAudio = (f: File) => f.type.startsWith('audio/') || /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i.test(f.name);
 
 export function App() {
@@ -135,6 +153,9 @@ export function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [project, setProject] = useState<{ id: string; name: string; created: number } | null>(null);
   const [projectsOpen, setProjectsOpen] = useState(false);
+  const [showStart, setShowStart] = useState(true);
+  const [kind, setKind] = useState<ProjectKind>('loop');
+  const [tourOpen, setTourOpen] = useState(false);
 
   const update = useCallback((patch: Partial<SceneConfig>) => setCfg((c) => ({ ...c, ...patch })), []);
   const timing = timingFor(cfg);
@@ -291,7 +312,7 @@ export function App() {
 
   const coverRef = useRef(cover);
   coverRef.current = cover;
-  const onSongFile = useCallback(async (file: File) => {
+  const onSongFile = useCallback(async (file: File): Promise<boolean> => {
     setSongLoading(true);
     try {
       // Loaded on demand: the audio reader (Mediabunny) isn't needed until a song is added.
@@ -327,8 +348,10 @@ export function App() {
       setPlaying(false);
       setRestartKey((k) => k + 1);
       setToast(`Canción cargada (${formatDuration(s.duration)})${notes.length ? ': ' + notes.join(', ') : ''}. Dale play para escucharla.`);
+      return true;
     } catch (err) {
       setToast(`No pude leer “${file.name}”: ${(err as Error).message}`);
+      return false;
     } finally {
       setSongLoading(false);
     }
@@ -367,6 +390,7 @@ export function App() {
       if (!f) return;
       if (isAudio(f)) onSongFile(f);
       else onImage('cover', f);
+      beginRef.current(isAudio(f) ? 'song' : 'loop');
     };
     window.addEventListener('dragenter', enter);
     window.addEventListener('dragleave', leave);
@@ -379,6 +403,101 @@ export function App() {
       window.removeEventListener('drop', drop);
     };
   }, [onImage, onSongFile]);
+
+  // ---------- Start screen and tour ----------
+  // The tour switches tabs to show them; closing it goes back to where the user was.
+  const tabBeforeTour = useRef<Tab>('image');
+  const startTour = (from: Tab = tab) => {
+    markTourSeen();
+    tabBeforeTour.current = from;
+    setTourOpen(true);
+  };
+  const beginProject = (k: ProjectKind) => {
+    setShowStart(false);
+    setKind(k);
+    setTab(k === 'song' ? 'music' : 'image');
+    if (k === 'song') setMode('song');
+    if (!tourSeen()) startTour(k === 'song' ? 'music' : 'image');
+  };
+  const showStartRef = useRef(showStart);
+  showStartRef.current = showStart;
+  const beginRef = useRef<(k: ProjectKind) => void>(() => {});
+  beginRef.current = (k) => {
+    if (showStartRef.current) beginProject(k);
+  };
+
+  const tourSteps = useMemo<TourStep[]>(() => {
+    const song = kind === 'song';
+    const steps: TourStep[] = [
+      {
+        title: song ? 'El video del tema completo' : 'Un loop para editar',
+        text: song
+          ? 'Te muestro en un minuto cómo armar el video de tu canción. Podés salir cuando quieras con Esc.'
+          : 'Te muestro en un minuto cómo armar tu loop. Podés salir cuando quieras con Esc.',
+      },
+      {
+        target: '.tabs',
+        title: 'Las secciones',
+        text: 'Están en orden: primero lo visual, después el sonido y al final la salida. Podés saltar a cualquiera cuando quieras.',
+      },
+    ];
+    if (song) {
+      steps.push({
+        target: '.panel .section',
+        before: () => setTab('music'),
+        title: 'Tu canción',
+        text: 'El video dura exactamente lo que el tema: la intro, los loops y el outro se calculan solos.',
+      });
+    }
+    steps.push(
+      {
+        target: '.panel .section',
+        before: () => setTab('image'),
+        title: 'Tu foto',
+        text: 'Arrastrá la tapa del disco (o cualquier foto) a cualquier parte de la ventana. Acá también elegís la funda y la galleta.',
+      },
+      {
+        target: '.stage .canvas-wrap',
+        title: 'La vista previa',
+        text: 'Es el video tal cual se va a exportar. Espacio pausa, las flechas avanzan de a un frame.',
+      },
+      {
+        target: '.toolbar .segmented',
+        title: 'Qué reproducir',
+        text: song
+          ? '“Canción” reproduce el video entero con la música. “Loop” sirve para chequear que el giro empalme perfecto.'
+          : '“Loop” repite solo el giro para que veas que empalma perfecto. “Completo” muestra intro, loop y outro.',
+      },
+      {
+        target: '[data-tab="scene"], [data-tab="background"], [data-tab="text"]',
+        before: () => setTab('scene'),
+        title: 'Dale tu estilo',
+        text: 'En Escena, Fondo y Texto elegís cómo sale el disco, los colores y el nombre del tema con su animación.',
+      },
+    );
+    if (song) {
+      steps.push({
+        target: '[data-tab="lyrics"]',
+        title: 'Letra karaoke (opcional)',
+        text: 'Buscala online, pegala o dejá que la transcriba: se sincroniza con la canción y el disco se corre para mostrarla.',
+      });
+    }
+    steps.push(
+      {
+        target: '.toolbar .primary',
+        title: 'Exportá',
+        text: song
+          ? 'MP4 con la canción para subir directo. En Miniatura armás también la portada para YouTube.'
+          : 'MP4 para redes; WebM, PNG o ProRes con transparencia para tu editor.',
+      },
+      {
+        target: '.projects-btn',
+        title: 'Guardá tu proyecto',
+        text: 'Queda en este navegador con la foto, la canción y la letra. Ctrl+S guarda. El botón ? repite este tutorial.',
+      },
+    );
+    return steps;
+  }, [kind]);
 
   // ---------- Projects ----------
   const stateKey = useMemo(
@@ -461,6 +580,8 @@ export function App() {
     setPlaying(false);
     setRestartKey((k) => k + 1);
     setProject({ id: p.id, name: p.name, created: p.created });
+    setKind(s || p.typedDuration ? 'song' : 'loop');
+    setShowStart(false);
     markSaved.current = true;
     setSavedKey('');
     const missing = [p.cover && !cov && 'la foto', p.song && !s && 'la canción'].filter(Boolean);
@@ -487,6 +608,7 @@ export function App() {
     setRestartKey((k) => k + 1);
     setProject(null);
     setTab('image');
+    setShowStart(true);
     markSaved.current = true;
     setSavedKey('');
   };
@@ -618,6 +740,7 @@ export function App() {
             <Fragment key={t.id}>
             {i > 0 && TABS[i - 1].group !== t.group && <span className="tab-sep" aria-hidden />}
             <button
+              data-tab={t.id}
               title={t.desc}
               type="button"
               role="tab"
@@ -750,6 +873,9 @@ export function App() {
           </>
           )}
           <div className="spacer" />
+          <button type="button" className="icon-btn help-btn" onClick={() => startTour()} title="Ver el tutorial" aria-label="Ver el tutorial">
+            ?
+          </button>
           <span className="badge-info">{tab === 'thumb' ? '1280×720 · JPG' : `${cfg.width}×${cfg.height} · ${cfg.fps} fps`}</span>
           <button type="button" className="primary" onClick={() => setTab('export')}>
             <Icon name="export" size={16} />
@@ -807,6 +933,34 @@ export function App() {
             <b>Soltá una imagen (portada) o una canción</b>
           </div>
         </div>
+      )}
+      {showStart && (
+        <StartScreen
+          songLoading={songLoading}
+          onLoop={(photo) => {
+            if (photo) onImage('cover', photo);
+            beginProject('loop');
+          }}
+          onSong={async (file) => {
+            if (await onSongFile(file)) beginProject('song');
+          }}
+          onOpenProject={async (id) => {
+            const p = await getProject(id);
+            if (!p) throw new Error('No encontré ese proyecto.');
+            await openProject(p);
+          }}
+          onAllProjects={() => setProjectsOpen(true)}
+          onClose={() => setShowStart(false)}
+        />
+      )}
+      {tourOpen && (
+        <Tour
+          steps={tourSteps}
+          onClose={() => {
+            setTourOpen(false);
+            setTab(tabBeforeTour.current);
+          }}
+        />
       )}
       {projectsOpen && (
         <ProjectsDialog
