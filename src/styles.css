@@ -765,7 +765,8 @@ button.link {
 /* ---------- Main / preview ---------- */
 .main {
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
 }
@@ -1178,4 +1179,50 @@ kbd {
   padding: 10px;
   border-radius: 8px;
   background: var(--panel-2);
+}
+
+/* Lyric timing editor */
+.lyrics-timeline {
+  min-width: 0;
+  border-top: 1px solid var(--line);
+  padding: 8px 16px 12px;
+  background: var(--panel);
+}
+.lt-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+.lt-bar .hint {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.lt-bar .spacer {
+  flex: 1;
+}
+.icon-btn.small {
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+}
+.mini-check {
+  min-height: 0;
+  font-size: 12px;
+  gap: 6px;
+}
+.lyrics-timeline canvas {
+  display: block;
+  border-radius: 6px;
+}
+.nowrap {
+  white-space: nowrap;
+}
+button.secondary.small-btn {
+  padding: 4px 9px;
+  font-size: 12px;
 }

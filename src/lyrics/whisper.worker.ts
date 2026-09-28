@@ -3,7 +3,14 @@ import { pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/
 // Speech-to-text with word timestamps, fully in the browser. The model is downloaded from
 // Hugging Face the first time and cached by the browser; the audio never leaves the machine.
 
-export type WhisperModel = 'base' | 'small';
+export type WhisperModel = 'base' | 'small' | 'large';
+
+const MODEL_IDS: Record<WhisperModel, string> = {
+  base: 'onnx-community/whisper-base_timestamped',
+  small: 'onnx-community/whisper-small_timestamped',
+  // Much better with sung vocals; only practical on WebGPU (~560 MB in q4f16).
+  large: 'onnx-community/whisper-large-v3-turbo_timestamped',
+};
 
 export interface WhisperRequest {
   audio: Float32Array; // 16 kHz mono
@@ -25,21 +32,30 @@ let cached: { model: WhisperModel; pipe: AutomaticSpeechRecognitionPipeline } | 
 
 async function load(model: WhisperModel): Promise<AutomaticSpeechRecognitionPipeline> {
   if (cached?.model === model) return cached.pipe;
-  const id = `onnx-community/whisper-${model}_timestamped`;
+  const id = MODEL_IDS[model];
   const progress_callback = (p: { status: string; file?: string; progress?: number }) => {
     if (p.status === 'progress' && p.file) post({ type: 'loading', file: p.file, progress: p.progress ?? 0 });
   };
-  const hasGpu = 'gpu' in navigator && !!(await (navigator as unknown as { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
+  const adapter = 'gpu' in navigator ? await (navigator as unknown as { gpu: { requestAdapter(): Promise<{ features: Set<string> } | null> } }).gpu.requestAdapter().catch(() => null) : null;
+  if (model === 'large' && !adapter) throw new Error('El modelo de máxima precisión necesita WebGPU (probá Chrome o Edge actualizados).');
+  const f16 = !!adapter?.features.has('shader-f16');
+  const gpuDtype =
+    model === 'large'
+      ? f16
+        ? { encoder_model: 'q4f16', decoder_model_merged: 'q4f16' }
+        : { encoder_model: 'q4', decoder_model_merged: 'q4' }
+      : { encoder_model: 'fp32', decoder_model_merged: 'q4' };
   let pipe: AutomaticSpeechRecognitionPipeline;
   try {
-    if (!hasGpu) throw new Error('no webgpu');
+    if (!adapter) throw new Error('no webgpu');
     pipe = (await pipeline('automatic-speech-recognition', id, {
       device: 'webgpu',
-      dtype: { encoder_model: 'fp32', decoder_model_merged: 'q4' },
+      dtype: gpuDtype as never,
       progress_callback,
     })) as AutomaticSpeechRecognitionPipeline;
     post({ type: 'device', device: 'WebGPU' });
-  } catch {
+  } catch (err) {
+    if (model === 'large') throw err;
     pipe = (await pipeline('automatic-speech-recognition', id, { device: 'wasm', dtype: 'q8', progress_callback })) as AutomaticSpeechRecognitionPipeline;
     post({ type: 'device', device: 'CPU (WASM)' });
   }

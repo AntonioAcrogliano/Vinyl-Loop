@@ -12,6 +12,7 @@ import { ExportPanel, type ExportSettings, type ExportStatus } from './ExportPan
 import { Icon, type IconName } from './icons';
 import { ImagePanel, type LoadedImage } from './ImagePanel';
 import { LyricsPanel } from './LyricsPanel';
+import { LyricsTimeline } from './LyricsTimeline';
 import { MusicPanel } from './MusicPanel';
 import { PresetPanel } from './PresetPanel';
 import { Preview, type PreviewMode } from './Preview';
@@ -62,8 +63,31 @@ export function App() {
   const [autoFit, setAutoFit] = useState(true);
   const [typedDuration, setTypedDuration] = useState<number | null>(null);
   const [includeAudio, setIncludeAudio] = useState(true);
-  const [lyrics, setLyrics] = useState<Lyrics | null>(null);
+  const [lyrics, setLyricsRaw] = useState<Lyrics | null>(null);
+  // Undo for lyric edits: snapshots before each change (drags snapshot once, at the start).
+  const lyricsRef = useRef<Lyrics | null>(null);
+  lyricsRef.current = lyrics;
+  const history = useRef<(Lyrics | null)[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const snapshot = useCallback(() => {
+    history.current.push(lyricsRef.current);
+    if (history.current.length > 100) history.current.shift();
+    setCanUndo(true);
+  }, []);
+  const setLyrics = useCallback(
+    (l: Lyrics | null) => {
+      snapshot();
+      setLyricsRaw(l);
+    },
+    [snapshot],
+  );
+  const undoLyrics = useCallback(() => {
+    if (!history.current.length) return;
+    setLyricsRaw(history.current.pop() ?? null);
+    setCanUndo(history.current.length > 0);
+  }, []);
   const [seekRequest, setSeekRequest] = useState<{ time: number; id: number } | null>(null);
+  const [vocals, setVocals] = useState<Float32Array | null>(null);
   // One audio element per song, shared by the preview (song mode) and the lyrics editor.
   const [audio, setAudio] = useState<HTMLAudioElement | null>(null);
   const [tab, setTab] = useState<Tab>('image');
@@ -175,6 +199,9 @@ export function App() {
   );
 
   useEffect(() => {
+    setVocals(null);
+    history.current = [];
+    setCanUndo(false);
     if (!song) {
       setAudio(null);
       return;
@@ -197,6 +224,18 @@ export function App() {
     setSeekRequest((r) => ({ time, id: (r?.id ?? 0) + 1 }));
     setPlaying(true);
   };
+
+  useEffect(() => {
+    if (tab !== 'lyrics') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z' || e.shiftKey) return;
+      if (e.target instanceof Element && e.target.closest('input, textarea, select')) return;
+      e.preventDefault();
+      undoLyrics();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tab, undoLyrics]);
 
   // ---------- Files ----------
   const onImage = useCallback(async (kind: 'cover' | 'label', file: File) => {
@@ -425,6 +464,7 @@ export function App() {
               setLyrics={setLyrics}
               onPlayAt={playAt}
               onGoToMusic={() => setTab('music')}
+              onVocals={setVocals}
             />
           )}
           {tab === 'background' && <BackgroundPanel cfg={cfg} update={update} photoPalette={photoPalette} />}
@@ -503,6 +543,19 @@ export function App() {
           songCtx={songCtx}
           seekRequest={seekRequest}
         />
+        {tab === 'lyrics' && song && lyrics && lyrics.lines.some((l) => Number.isFinite(l.start)) && (
+          <LyricsTimeline
+            song={song}
+            audio={audio}
+            lyrics={lyrics}
+            setLyrics={setLyricsRaw}
+            onBeginEdit={snapshot}
+            onUndo={canUndo ? undoLyrics : null}
+            offset={cfg.lyrics.offset}
+            onPlayAt={playAt}
+            vocals={vocals}
+          />
+        )}
       </main>
 
       <input

@@ -19,6 +19,8 @@ interface Props {
   /** Play the song (video "Canción" mode) from this song time. */
   onPlayAt: (seconds: number) => void;
   onGoToMusic: () => void;
+  /** Isolated vocals became available (for the timing editor's waveform). */
+  onVocals: (v: Float32Array | null) => void;
 }
 
 const SOURCE_NAME: Record<LyricsSource, string> = { lrclib: 'LRCLIB', whisper: 'Whisper', file: 'archivo .lrc', manual: 'manual' };
@@ -60,7 +62,7 @@ function TimeInput({ value, onChange }: { value: number; onChange: (v: number) =
   );
 }
 
-export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPlayAt, onGoToMusic }: Props) {
+export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPlayAt, onGoToMusic, onVocals }: Props) {
   const L = cfg.lyrics;
   const set = (patch: Partial<SceneConfig['lyrics']>) => update({ lyrics: { ...L, ...patch } });
   const lines = lyrics?.lines ?? [];
@@ -92,8 +94,13 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
   };
 
   // ---- Whisper (transcription and automatic sync share the same settings and progress) ----
-  const [model, setModel] = useState<WhisperModel>('base');
+  const [model, setModel] = useState<WhisperModel>('small');
   const [lang, setLang] = useState('spanish');
+  const [isolate, setIsolate] = useState(true);
+  const [gpu, setGpu] = useState<boolean | null>(null);
+  useEffect(() => {
+    import('../lyrics/whisper').then((w) => w.hasWebGpu()).then(setGpu);
+  }, []);
   const [tx, setTx] = useState<TranscribeProgress | null>(null);
   const [txLabel, setTxLabel] = useState('');
   const abortRef = useRef<AbortController | null>(null);
@@ -105,7 +112,8 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
     setTxLabel(label);
     setTx({ stage: 'decoding' });
     try {
-      await job({ model, language: lang || null, onProgress: setTx, signal: ac.signal });
+      await job({ model, language: lang || null, isolate, onProgress: setTx, signal: ac.signal });
+      if (isolate) onVocals((await import('../lyrics/whisper')).cachedVocals(song.file));
     } catch (err) {
       setMsg((err as Error).name === 'AbortError' ? 'Cancelado.' : `Error de Whisper: ${(err as Error).message}`);
     } finally {
@@ -257,13 +265,15 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
         {tx && (
           <div className="progress-wrap task">
             <div className="progress">
-              <progress value={tx.stage === 'downloading' ? tx.progress : undefined} max={1} />
+              <progress value={tx.progress} max={1} />
               <button type="button" className="secondary" onClick={() => abortRef.current?.abort()}>
                 Cancelar
               </button>
             </div>
             <p className="hint">
               {tx.stage === 'decoding' && 'Preparando el audio…'}
+              {tx.stage === 'separator' && `Descargando el separador de voz (67 MB, solo la primera vez)… ${Math.round((tx.progress ?? 0) * 100)} %`}
+              {tx.stage === 'separating' && `Separando la voz de la música${tx.device ? ` (${tx.device})` : ''}… ${Math.round((tx.progress ?? 0) * 100)} %`}
               {tx.stage === 'downloading' && `Descargando el modelo de Whisper (solo la primera vez)… ${Math.round((tx.progress ?? 0) * 100)} %`}
               {tx.stage === 'transcribing' && `${txLabel}${tx.device ? ` (${tx.device})` : ''}… puede tardar un par de minutos.`}
             </p>
@@ -349,11 +359,19 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
           full
           value={model}
           options={[
-            { value: 'base', label: 'Rápido (~80 MB)' },
-            { value: 'small', label: 'Preciso (~250 MB)' },
+            { value: 'base', label: 'Rápido', title: '~80 MB' },
+            { value: 'small', label: 'Preciso', title: '~250 MB' },
+            { value: 'large', label: 'Máxima', title: gpu === false ? 'Necesita WebGPU' : '~560 MB, necesita WebGPU', disabled: gpu === false },
           ]}
           onChange={setModel}
         />
+        <p className="hint">
+          {model === 'base' && 'Rápido (~80 MB): bien para voz clara; con música erra bastante.'}
+          {model === 'small' && 'Preciso (~250 MB): buen equilibrio para temas cantados.'}
+          {model === 'large' && 'Máxima precisión (~560 MB, WebGPU): el mejor con voz cantada. La primera descarga tarda.'}
+        </p>
+        <Check label="Aislar la voz antes de escuchar (recomendado)" checked={isolate} onChange={setIsolate} />
+        <p className="hint">Separa la voz de los instrumentos con un modelo de IA (67 MB, una vez). Es lo que más mejora la sincronización en temas con mucha música; suma uno o dos minutos.</p>
         <label className="row">
           <span>Idioma</span>
           <select value={lang} onChange={(e) => setLang(e.target.value)}>
