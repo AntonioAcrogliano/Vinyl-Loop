@@ -3,7 +3,7 @@ import type { Song } from '../audio/song';
 import { downloadBlob } from '../export/common';
 import type { LrclibResult } from '../lyrics/lrclib';
 import { linesFromText, parseLrc, toLrc, type LyricLine, type Lyrics, type LyricsSource } from '../lyrics/lyrics';
-import type { TranscribeProgress, WhisperModel } from '../lyrics/whisper';
+import type { TranscribeOptions, TranscribeProgress, WhisperModel } from '../lyrics/whisper';
 import type { LyricsOpen, SceneConfig, TextFont } from '../render/types';
 import { formatDuration, parseDuration } from '../utils/fit';
 import { Icon } from './icons';
@@ -91,45 +91,78 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
     }
   };
 
-  const applyResult = async (r: LrclibResult) => {
-    const { linesOf } = await import('../lyrics/lrclib');
-    setLyrics({ lines: linesOf(r), source: 'lrclib' });
-    set({ enabled: true });
-    setResults(null);
-    setMsg(`Letra de “${r.trackName}” (${r.artistName}) cargada.`);
-  };
-
-  // ---- Whisper ----
+  // ---- Whisper (transcription and automatic sync share the same settings and progress) ----
   const [model, setModel] = useState<WhisperModel>('base');
   const [lang, setLang] = useState('spanish');
   const [tx, setTx] = useState<TranscribeProgress | null>(null);
+  const [txLabel, setTxLabel] = useState('');
   const abortRef = useRef<AbortController | null>(null);
-  const runWhisper = async () => {
-    if (!song) return;
+  const withWhisper = async (label: string, job: (opts: TranscribeOptions) => Promise<void>) => {
+    if (!song || tx) return;
     const ac = new AbortController();
     abortRef.current = ac;
     setMsg('');
+    setTxLabel(label);
     setTx({ stage: 'decoding' });
-    const t0 = performance.now();
     try {
-      const { transcribe } = await import('../lyrics/whisper');
-      const result = await transcribe(song.file, { model, language: lang || null, onProgress: setTx, signal: ac.signal });
-      if (!result.length) setMsg('Whisper no encontró voz. ¿El tema es instrumental?');
-      else {
-        setLyrics({ lines: result, source: 'whisper' });
-        set({ enabled: true });
-        setMsg(`Transcripción lista en ${Math.round((performance.now() - t0) / 1000)} s. Revisala: Whisper se puede equivocar con la letra.`);
-      }
+      await job({ model, language: lang || null, onProgress: setTx, signal: ac.signal });
     } catch (err) {
-      setMsg((err as Error).name === 'AbortError' ? 'Transcripción cancelada.' : `Error de Whisper: ${(err as Error).message}`);
+      setMsg((err as Error).name === 'AbortError' ? 'Cancelado.' : `Error de Whisper: ${(err as Error).message}`);
     } finally {
       setTx(null);
       abortRef.current = null;
     }
   };
 
+  const runWhisper = () =>
+    withWhisper('Transcribiendo', async (opts) => {
+      const t0 = performance.now();
+      const { transcribe } = await import('../lyrics/whisper');
+      const result = await transcribe(song!.file, opts);
+      if (!result.length) setMsg('Whisper no encontró voz. ¿El tema es instrumental?');
+      else {
+        setLyrics({ lines: result, source: 'whisper' });
+        set({ enabled: true });
+        setMsg(`Transcripción lista en ${Math.round((performance.now() - t0) / 1000)} s. Revisala: Whisper se puede equivocar con la letra.`);
+      }
+    });
+
+  /** Keeps the given text exactly and takes the timings from the audio (word by word). */
+  const autoSync = (target: { text: string }[], source: LyricsSource) =>
+    withWhisper('Sincronizando la letra con el audio', async (opts) => {
+      const { syncLyrics } = await import('../lyrics/whisper');
+      const r = await syncLyrics(song!.file, target, opts);
+      if (r.matched === 0) {
+        setMsg('No pude reconocer esta letra en el audio. ¿Es la misma canción y el idioma correcto? Podés sincronizarla tocando.');
+        return;
+      }
+      setLyrics({ lines: r.lines, source });
+      set({ enabled: true });
+      const pct = Math.round(r.matched * 100);
+      setMsg(
+        pct === 100
+          ? 'Sincronizada palabra por palabra: se reconocieron todas las palabras.'
+          : `Sincronizada palabra por palabra: se reconoció el ${pct} % de las palabras` +
+              (r.matched < 0.5 ? '. Bastante quedó estimado: revisá los tiempos o corregilos tocando.' : '; el resto se ubicó entre sus vecinas.'),
+      );
+    });
+
+  const applyResult = async (r: LrclibResult) => {
+    const { linesOf } = await import('../lyrics/lrclib');
+    const found = linesOf(r);
+    setResults(null);
+    if (r.syncedLyrics) {
+      setLyrics({ lines: found, source: 'lrclib' });
+      set({ enabled: true });
+      setMsg(`Letra de “${r.trackName}” (${r.artistName}) cargada.`);
+    } else {
+      // Plain lyrics: correct text, no timings → align them to the audio.
+      setLyrics({ lines: found, source: 'lrclib' });
+      await autoSync(found, 'lrclib');
+    }
+  };
+
   // ---- Paste / files ----
-  const [pasting, setPasting] = useState(false);
   const [pasted, setPasted] = useState('');
   const importLrc = async (f: File) => {
     const parsed = parseLrc(await f.text());
@@ -221,7 +254,24 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
       </Section>
 
       <Section title="Conseguir la letra">
-        <h3>Buscar online (LRCLIB)</h3>
+        {tx && (
+          <div className="progress-wrap task">
+            <div className="progress">
+              <progress value={tx.stage === 'downloading' ? tx.progress : undefined} max={1} />
+              <button type="button" className="secondary" onClick={() => abortRef.current?.abort()}>
+                Cancelar
+              </button>
+            </div>
+            <p className="hint">
+              {tx.stage === 'decoding' && 'Preparando el audio…'}
+              {tx.stage === 'downloading' && `Descargando el modelo de Whisper (solo la primera vez)… ${Math.round((tx.progress ?? 0) * 100)} %`}
+              {tx.stage === 'transcribing' && `${txLabel}${tx.device ? ` (${tx.device})` : ''}… puede tardar un par de minutos.`}
+            </p>
+          </div>
+        )}
+        {msg && <p className="hint ok">{msg}</p>}
+
+        <h3>1 · Buscarla online (LRCLIB)</h3>
         <label className="row text-row">
           <span>Tema</span>
           <input type="text" value={q.title} onChange={(e) => setQ({ ...q, title: e.target.value })} />
@@ -231,7 +281,7 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
           <input type="text" value={q.artist} onChange={(e) => setQ({ ...q, artist: e.target.value })} />
         </label>
         <button type="button" className="secondary" disabled={searching || !q.title.trim()} onClick={search}>
-          {searching ? 'Buscando…' : 'Buscar letra sincronizada'}
+          {searching ? 'Buscando…' : 'Buscar letra'}
         </button>
         <p className="hint">Se envían solo el título, el artista y la duración a lrclib.net. El audio no sale de tu compu.</p>
         {results && results.length > 0 && (
@@ -239,13 +289,14 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
             {results.slice(0, 8).map((r) => {
               const diff = r.duration - song.duration;
               return (
-                <button key={r.id} type="button" className="result" onClick={() => applyResult(r)} role="listitem">
+                <button key={r.id} type="button" className="result" disabled={!!tx} onClick={() => applyResult(r)} role="listitem">
                   <b>
-                    {r.trackName} · {r.artistName}
+                    {r.trackName} · {r.artistName} {r.syncedLyrics ? <em className="tag">sincronizada</em> : <em className="tag plain">solo texto</em>}
                   </b>
                   <small>
                     {r.albumName || 'Sin álbum'} · {formatDuration(r.duration)}
                     {Math.abs(diff) < 2 ? ' · misma duración' : ` · ${diff > 0 ? '+' : ''}${Math.round(diff)} s`}
+                    {!r.syncedLyrics && ' · se sincroniza con el audio'}
                   </small>
                 </button>
               );
@@ -253,7 +304,47 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
           </div>
         )}
 
-        <h3>Transcribir con Whisper</h3>
+        <h3>2 · Pegar la letra</h3>
+        <div className="paste">
+          <textarea rows={6} placeholder="Pegá la letra acá, una línea por renglón" value={pasted} onChange={(e) => setPasted(e.target.value)} />
+          <button
+            type="button"
+            className="primary"
+            disabled={!pasted.trim() || !!tx}
+            onClick={async () => {
+              const pastedLines = linesFromText(pasted);
+              setLyrics({ lines: pastedLines, source: 'manual' });
+              setPasted('');
+              await autoSync(pastedLines, 'manual');
+            }}
+          >
+            Sincronizar automáticamente
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            disabled={!pasted.trim()}
+            onClick={() => {
+              setLyrics({ lines: linesFromText(pasted), source: 'manual' });
+              setPasted('');
+              setTapIndex(0);
+              onPlayAt(0);
+              setMsg('Dale Enter (o “Marcar”) cada vez que empieza una línea.');
+            }}
+          >
+            Sincronizar tocando
+          </button>
+        </div>
+        <p className="hint">
+          Automático: Whisper escucha la canción y se ubica cada palabra de tu letra en el audio. Tu texto no se cambia; solo se le ponen los tiempos.
+        </p>
+
+        <h3>3 · Transcribirla (si no tenés la letra)</h3>
+        <button type="button" className="secondary" disabled={!!tx} onClick={runWhisper}>
+          Transcribir la canción con Whisper
+        </button>
+
+        <h3>Ajustes de Whisper</h3>
         <Segmented<WhisperModel>
           full
           value={model}
@@ -273,28 +364,9 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
             ))}
           </select>
         </label>
-        {tx ? (
-          <div className="progress-wrap">
-            <div className="progress">
-              <progress value={tx.stage === 'downloading' ? tx.progress : undefined} max={1} />
-              <button type="button" className="secondary" onClick={() => abortRef.current?.abort()}>
-                Cancelar
-              </button>
-            </div>
-            <p className="hint">
-              {tx.stage === 'decoding' && 'Preparando el audio…'}
-              {tx.stage === 'downloading' && `Descargando el modelo (solo la primera vez)… ${Math.round((tx.progress ?? 0) * 100)} %`}
-              {tx.stage === 'transcribing' && `Transcribiendo${tx.device ? ` con ${tx.device}` : ''}… puede tardar un par de minutos.`}
-            </p>
-          </div>
-        ) : (
-          <button type="button" className="secondary" onClick={runWhisper}>
-            Transcribir la canción
-          </button>
-        )}
-        <p className="hint">Corre en tu navegador: el audio no se sube a ningún lado. Da tiempos palabra por palabra, pero puede equivocarse con la letra.</p>
+        <p className="hint">Se usan para sincronizar y para transcribir. Corre en tu navegador: el audio no se sube; el modelo se descarga una vez.</p>
 
-        <h3>Archivo o texto</h3>
+        <h3>Archivo .lrc</h3>
         <div className="button-row">
           <label className="button secondary">
             Importar .lrc
@@ -309,9 +381,6 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
               }}
             />
           </label>
-          <button type="button" className="secondary" onClick={() => setPasting((p) => !p)}>
-            Pegar texto
-          </button>
           <button
             type="button"
             className="secondary"
@@ -321,27 +390,6 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
             Exportar .lrc
           </button>
         </div>
-        {pasting && (
-          <div className="paste">
-            <textarea rows={8} placeholder="Pegá la letra, una línea por renglón" value={pasted} onChange={(e) => setPasted(e.target.value)} />
-            <button
-              type="button"
-              className="secondary"
-              disabled={!pasted.trim()}
-              onClick={() => {
-                setLyrics({ lines: linesFromText(pasted), source: 'manual' });
-                setPasting(false);
-                setPasted('');
-                setTapIndex(0);
-                onPlayAt(0);
-                setMsg('Dale Enter (o “Marcar”) cada vez que empieza una línea.');
-              }}
-            >
-              Usar y sincronizar tocando
-            </button>
-          </div>
-        )}
-        {msg && <p className="hint ok">{msg}</p>}
       </Section>
 
       {lyrics && (
@@ -366,17 +414,23 @@ export function LyricsPanel({ cfg, update, song, audio, lyrics, setLyrics, onPla
               </p>
             </div>
           ) : (
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => {
-                setTapIndex(0);
-                onPlayAt(0);
-              }}
-            >
-              Sincronizar tocando (desde el principio)
-            </button>
+            <div className="button-row">
+              <button type="button" className="secondary" disabled={!!tx || !lines.length} onClick={() => autoSync(lines, lyrics.source)}>
+                Ajustar tiempos automáticamente
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  setTapIndex(0);
+                  onPlayAt(0);
+                }}
+              >
+                Sincronizar tocando
+              </button>
+            </div>
           )}
+          {tx && <p className="hint">{txLabel}… (arriba podés ver el progreso o cancelar)</p>}
           <div className="lines">
             {lines.map((l, i) => (
               <div key={i} className={i === current ? 'line on' : tapIndex === i ? 'line next' : 'line'}>

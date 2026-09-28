@@ -1,4 +1,5 @@
-import { groupWords, type LyricLine } from './lyrics';
+import { alignLyrics, type AlignResult } from './align';
+import { groupWords, type LyricLine, type LyricWord } from './lyrics';
 import type { WhisperMessage, WhisperModel } from './whisper.worker';
 
 export type { WhisperModel };
@@ -28,21 +29,48 @@ async function toMono16k(file: File): Promise<Float32Array> {
   return out;
 }
 
+export interface TranscribeOptions {
+  model: WhisperModel;
+  language: string | null;
+  onProgress: (p: TranscribeProgress) => void;
+  signal?: AbortSignal;
+}
+
+/** Transcriptions already done in this session, per song file and settings. */
+const cache = new WeakMap<File, Map<string, LyricWord[]>>();
+
 /**
- * Transcribes the song in a worker and groups the words into lines. Runs locally; only the
- * model files are downloaded (once, then cached by the browser).
+ * Timed words of the song, transcribed in a worker. Runs locally; only the model files are
+ * downloaded (once, then cached by the browser). Repeated calls reuse the result.
  */
-export async function transcribe(
-  file: File,
-  opts: { model: WhisperModel; language: string | null; onProgress: (p: TranscribeProgress) => void; signal?: AbortSignal },
-): Promise<LyricLine[]> {
+export async function transcribeWords(file: File, opts: TranscribeOptions): Promise<LyricWord[]> {
+  const key = `${opts.model}|${opts.language ?? 'auto'}`;
+  const hit = cache.get(file)?.get(key);
+  if (hit) return hit;
+  const words = await runWorker(file, opts);
+  if (!cache.has(file)) cache.set(file, new Map());
+  cache.get(file)!.set(key, words);
+  return words;
+}
+
+/** Transcription grouped into lines (when there is no text to align). */
+export async function transcribe(file: File, opts: TranscribeOptions): Promise<LyricLine[]> {
+  return groupWords(await transcribeWords(file, opts));
+}
+
+/** The user's lyrics, timed with the transcription (text kept exactly as given). */
+export async function syncLyrics(file: File, lines: { text: string }[], opts: TranscribeOptions): Promise<AlignResult> {
+  return alignLyrics(lines, await transcribeWords(file, opts));
+}
+
+async function runWorker(file: File, opts: TranscribeOptions): Promise<LyricWord[]> {
   opts.onProgress({ stage: 'decoding' });
   const audio = await toMono16k(file);
   const worker = new Worker(new URL('./whisper.worker.ts', import.meta.url), { type: 'module' });
   const files = new Map<string, number>();
   let device: string | undefined;
   try {
-    return await new Promise<LyricLine[]>((resolve, reject) => {
+    return await new Promise<LyricWord[]>((resolve, reject) => {
       const abort = () => reject(new DOMException('Cancelado', 'AbortError'));
       opts.signal?.addEventListener('abort', abort);
       worker.onmessage = (e: MessageEvent<WhisperMessage>) => {
@@ -56,7 +84,7 @@ export async function transcribe(
         } else if (m.type === 'transcribing') {
           opts.onProgress({ stage: 'transcribing', device });
         } else if (m.type === 'done') {
-          resolve(groupWords(m.words));
+          resolve(m.words);
         } else if (m.type === 'error') {
           reject(new Error(m.message));
         }

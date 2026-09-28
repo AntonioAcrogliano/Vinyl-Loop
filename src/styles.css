@@ -1167,3 +1167,15 @@ kbd {
   text-overflow: ellipsis;
   display: block;
 }
+.tag.plain {
+  background: rgba(242, 179, 91, 0.15);
+  color: var(--warn);
+}
+.paste .primary {
+  width: 100%;
+}
+.task {
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+}
